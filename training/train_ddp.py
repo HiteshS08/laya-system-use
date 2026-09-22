@@ -129,6 +129,20 @@ def main():
     tok = AutoTokenizer.from_pretrained(os.path.join(model_dir, "tokenizer"))
     model = build_model(cfg, encoder_dir=os.path.join(model_dir, "encoder"))
     model.load_state_dict(load_file(os.path.join(model_dir, "model.safetensors")), strict=True)
+    use_lora = os.environ.get("USE_LORA", "0") == "1"
+    if use_lora:
+        from peft import LoraConfig, get_peft_model
+
+        # Generic by name, not by architecture: wraps every nn.Linear the encoder actually has (verified on
+        # Laya's ModernBERT-large: Wqkv, Wo, Wi), so this does not depend on peft officially listing ModernBERT.
+        linear_names = sorted(
+            {n.split(".")[-1] for n, m in model.encoder.named_modules() if isinstance(m, torch.nn.Linear)}
+        )
+        lora_cfg = LoraConfig(
+            r=int(os.environ.get("LORA_R", "8")), lora_alpha=int(os.environ.get("LORA_ALPHA", "16")),
+            target_modules=linear_names, lora_dropout=0.0,
+        )
+        model.encoder = get_peft_model(model.encoder, lora_cfg)
     model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.head_checkpointing = True
     model.to(device)
@@ -140,17 +154,24 @@ def main():
     my_items = all_items[rank::world][:per_rank]
 
     epochs = int(os.environ.get("EPOCHS", "4"))
-    micro_batch, grad_accum, group_size = 8, 4, 4
-    lr_encoder, lr_head, sigma_start, sigma_end = 2.5e-5, 1.0e-4, 0.4, 0.1
-    enc_params = [p for n, p in ddp_model.named_parameters() if "encoder." in n]
-    head_params = [p for n, p in ddp_model.named_parameters() if "encoder." not in n]
+    micro_batch, grad_accum = 8, 4
+    group_size = int(os.environ.get("GROUP_SIZE", "4"))
+    lr_encoder = float(os.environ.get("LR_ENCODER", "2.5e-5"))
+    lr_head = float(os.environ.get("LR_HEAD", "1.0e-4"))
+    sigma_start = float(os.environ.get("SIGMA_START", "0.4"))
+    sigma_end = float(os.environ.get("SIGMA_END", "0.1"))
+    # requires_grad filter matters once USE_LORA freezes the base encoder; a no-op otherwise (everything trains).
+    enc_params = [p for n, p in ddp_model.named_parameters() if "encoder." in n and p.requires_grad]
+    head_params = [p for n, p in ddp_model.named_parameters() if "encoder." not in n and p.requires_grad]
     optimizer = torch.optim.AdamW(
         [{"params": enc_params, "lr": lr_encoder}, {"params": head_params, "lr": lr_head}], weight_decay=0.01)
     total_updates = (len(my_items) // (micro_batch * grad_accum)) * epochs
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, total_updates), eta_min=1e-6)
     scaler = torch.amp.GradScaler("cuda", enabled=True)
     if rank == 0:
-        print(f"items={len(all_items)} per_rank={len(my_items)} epochs={epochs}", flush=True)
+        print(f"items={len(all_items)} per_rank={len(my_items)} epochs={epochs} use_lora={use_lora} "
+              f"lr_encoder={lr_encoder} lr_head={lr_head} sigma={sigma_start}->{sigma_end} group_size={group_size} "
+              f"trainable_enc_params={sum(p.numel() for p in enc_params):,}", flush=True)
     t0 = time.time()
 
     for epoch in range(epochs):
@@ -204,6 +225,10 @@ def main():
     if rank == 0:
         del optimizer, scaler, scheduler
         torch.cuda.empty_cache()
+        if use_lora:
+            # Fold the adapters into plain dense weights so model.safetensors stays the ordinary Laya format:
+            # laya.load() (unmodified, vendored) never needs to know LoRA was involved.
+            model.encoder = model.encoder.merge_and_unload()
         # save the trained weights first: calibration below must never be able to cost the training run
         os.makedirs(output_dir, exist_ok=True)
         save_file({k: v.half().contiguous().cpu() for k, v in model.state_dict().items()},

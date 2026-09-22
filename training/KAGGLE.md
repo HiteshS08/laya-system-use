@@ -11,7 +11,7 @@ Needs your Kaggle account. The items contain only Mind2Web **train** data (CC-BY
 
    Cell 1
    ```
-   !pip install -q "laya>=0.3.4" "transformers>=4.48" safetensors huggingface_hub
+   !pip install -q "laya>=0.3.4" "transformers>=4.48" safetensors huggingface_hub peft
    from huggingface_hub import snapshot_download
    from laya.agent import _fix_tokenizer_config
    model_dir = snapshot_download("convaiinnovations/laya")
@@ -24,6 +24,8 @@ Needs your Kaggle account. The items contain only Mind2Web **train** data (CC-BY
    ```
    The script reads `train_items.meta.json` next to `train_items.pt`, so keep both in the same folder.
 4. Watch the `reward` and `loss` lines. If the session hits its limit, rerun with `EPOCHS=2` (set with
-   `%env EPOCHS=2` before Cell 2).
+   `%env EPOCHS=2` before Cell 2). Other overridable env vars: `LR_ENCODER`, `LR_HEAD`, `SIGMA_START`,
+   `SIGMA_END`, `GROUP_SIZE`, and `USE_LORA=1` (with `LORA_R`, `LORA_ALPHA`) to freeze the base encoder and
+   train LoRA adapters instead — the saved checkpoint is merged back to plain dense weights either way.
 5. Download `/kaggle/working/laya_browser_mind2web` (Output tab) to `checkpoints/laya_browser_mind2web` on the Mac.
    It must contain `model.safetensors`, `encoder/`, `tokenizer/`, `rl_agent_config.json`.
