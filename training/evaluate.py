@@ -1,9 +1,20 @@
-"""Score a predictor on Mind2Web cases: operation accuracy, element accuracy given the gold operation, step success."""
+"""Score a predictor on Mind2Web cases.
+
+Micro metrics (op_acc, element_acc_given_op, element_acc_overall, step_success_*) pool all scored steps flat.
+Macro metrics (*_macro, success_rate) group by task first, matching the MindAct paper's protocol (Deng et al.,
+NeurIPS 2023, Table 2 caption: "step-wise metrics ... macro average across tasks") so numbers compare directly
+against its published Element Accuracy / Operation F1 / Step SR / SR. A step outside a task's action space
+(no_gold, op_not_allowed, gold_not_interactive with no reclaim target, gold_not_shortlisted) counts as a hard
+failure for the macro metrics: the deployed agent has no way to produce the right action for it. A "trivial" step
+(a single candidate for its operation) counts as correct without calling the predictor, matching what the
+deployed policy actually does (jev_ultrafast/policy.py skips the model when there is only one candidate).
+"""
 
 import argparse
 import json
 import logging
 import random
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -15,28 +26,69 @@ def _rate(hits: int, total: int) -> float | None:
     return round(hits / total, 4) if total else None
 
 
+def _macro(task_scores: Sequence[float]) -> float | None:
+    return round(sum(task_scores) / len(task_scores), 4) if task_scores else None
+
+
+def _forced_outcome(row: dict) -> bool | None:
+    """Correctness for a row the predictor is never asked about. None means 'use the real prediction'."""
+    if row["drop_reason"] == "trivial":
+        return True
+    if row["drop_reason"] is not None:
+        return False
+    return None
+
+
 def evaluate_rows(rows: Sequence[dict], predict: Predict) -> dict:
     valid = [r for r in rows if r["valid_gold"]]
     scored = [r for r in valid if r["gold_in_shortlist"]]
     op_hits = element_hits = step_hits = errors = 0
+    outcomes: dict[tuple[str, int], dict[str, bool]] = {}
     for row in scored:
+        key = (row["task_id"], row["step"])
         try:
             pred = predict(row)
         except ValueError as exc:
             errors += 1
             log.warning("predictor failed on task %s step %s: %s", row["task_id"], row["step"], exc)
+            outcomes[key] = {"element": False, "op": False, "step": False}
             continue
         op_ok = pred["operation"] == row["gold_op"]
         element_ok = pred["targets"].get(row["gold_op"]) == row["gold_id"]
         op_hits += op_ok
         element_hits += element_ok
         step_hits += op_ok and element_ok
+        outcomes[key] = {"element": element_ok, "op": op_ok, "step": op_ok and element_ok}
+
+    by_task: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        by_task[row["task_id"]].append(row)
+    element_accs, op_accs, step_accs, successes = [], [], [], []
+    for task_rows in by_task.values():
+        elements, ops, steps = [], [], []
+        for row in task_rows:
+            forced = _forced_outcome(row)
+            outcome = outcomes.get((row["task_id"], row["step"]), {"element": False, "op": False, "step": False})
+            elements.append(forced if forced is not None else outcome["element"])
+            ops.append(forced if forced is not None else outcome["op"])
+            steps.append(forced if forced is not None else outcome["step"])
+        element_accs.append(sum(elements) / len(elements))
+        op_accs.append(sum(ops) / len(ops))
+        step_accs.append(sum(steps) / len(steps))
+        successes.append(float(all(steps)))
+
     return {
         "steps": len(rows), "valid_gold": len(valid), "scored": len(scored), "errors": errors,
         "op_acc": _rate(op_hits, len(scored)),
         "element_acc_given_op": _rate(element_hits, len(scored)),
+        "element_acc_overall": _rate(element_hits, len(valid)),
         "step_success_scored": _rate(step_hits, len(scored)),
         "step_success_overall": _rate(step_hits, len(valid)),
+        "tasks": len(by_task),
+        "element_acc_macro": _macro(element_accs),
+        "op_acc_macro": _macro(op_accs),
+        "step_success_macro": _macro(step_accs),
+        "success_rate": _macro(successes),
     }
 
 
