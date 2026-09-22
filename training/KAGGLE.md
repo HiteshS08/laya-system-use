@@ -11,7 +11,7 @@ Needs your Kaggle account. The items contain only Mind2Web **train** data (CC-BY
 
    Cell 1
    ```
-   !pip install -q "laya>=0.3.4" "transformers>=4.48" safetensors huggingface_hub peft
+   !pip install -q "laya>=0.3.4" "transformers>=4.48" safetensors huggingface_hub peft "torchao>=0.16.0"
    from huggingface_hub import snapshot_download
    from laya.agent import _fix_tokenizer_config
    model_dir = snapshot_download("convaiinnovations/laya")
