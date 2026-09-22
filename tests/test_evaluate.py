@@ -1,3 +1,5 @@
+import json
+
 from m2w_fixtures import make_step, make_task
 
 from training import evaluate as ev
@@ -116,3 +118,31 @@ def test_predictor_error_fails_macro_and_success_rate_for_that_task():
 
     r = ev.evaluate_rows(rows(), boom)
     assert r["success_rate"] == 0.0 and r["step_success_macro"] == 0.0
+
+
+def _write_jsonl(path, rows_):
+    path.write_text("\n".join(json.dumps(r) for r in rows_))
+
+
+def test_load_rows_by_task_never_splits_a_task_across_the_sample(tmp_path):
+    # Row-level sampling can include 1 of a task's 5 steps, which makes success_rate meaningless.
+    task_a = make_task(make_step("CLICK", "10"), make_step("CLICK", "10"), make_step("CLICK", "10"))
+    task_a["annotation_id"] = "A"
+    task_b = make_task(make_step("CLICK", "10"))
+    task_b["annotation_id"] = "B"
+    all_rows = [*task_rows(task_a, k=20), *task_rows(task_b, k=20)]
+    path = tmp_path / "cases.jsonl"
+    _write_jsonl(path, all_rows)
+
+    sampled = ev.load_rows_by_task(path, n_tasks=1)
+    task_ids = {r["task_id"] for r in sampled}
+    assert len(task_ids) == 1  # exactly one task was chosen
+    full_count_for_that_task = sum(1 for r in all_rows if r["task_id"] in task_ids)
+    assert len(sampled) == full_count_for_that_task  # and every one of its rows came along
+
+
+def test_load_rows_by_task_returns_everything_when_n_exceeds_the_task_count(tmp_path):
+    all_rows = list(task_rows(make_task(make_step("CLICK", "10")), k=20))
+    path = tmp_path / "cases.jsonl"
+    _write_jsonl(path, all_rows)
+    assert len(ev.load_rows_by_task(path, n_tasks=50)) == len(all_rows)

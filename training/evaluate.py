@@ -120,6 +120,22 @@ def load_rows(path: Path, sample: int) -> list[dict]:
     return random.Random(0).sample(rows, sample) if 0 < sample < len(rows) else rows
 
 
+def load_rows_by_task(path: Path, n_tasks: int) -> list[dict]:
+    """Like load_rows, but samples whole tasks (every one of a chosen task's rows), never a partial trajectory.
+
+    Required for success_rate/*_macro: a task missing most of its steps would trivially look "successful" on
+    the few steps that happen to be present, which is not evidence of real task completion.
+    """
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    by_task: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        by_task[row["task_id"]].append(row)
+    task_ids = list(by_task)
+    if 0 < n_tasks < len(task_ids):
+        task_ids = random.Random(0).sample(task_ids, n_tasks)
+    return [row for task_id in task_ids for row in by_task[task_id]]
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)
@@ -128,11 +144,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--subfolder")
     parser.add_argument("--max-len", type=int)
     parser.add_argument("--head-max-len", type=int)
-    parser.add_argument("--sample", type=int, default=0, help="uniform random subset (seed 0); 0 means all rows")
+    parser.add_argument("--sample", type=int, default=0, help="uniform random ROW subset (seed 0); 0 means all rows")
+    parser.add_argument("--sample-tasks", type=int, default=0,
+                         help="random subset of whole TASKS (seed 0), every row included; use for success_rate "
+                              "and *_macro so a task's trajectory is never split. Overrides --sample.")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    rows = load_rows(args.cases, args.sample)
+    rows = (
+        load_rows_by_task(args.cases, args.sample_tasks) if args.sample_tasks else load_rows(args.cases, args.sample)
+    )
     if args.predictor == "laya":
         import laya
 
