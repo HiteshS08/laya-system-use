@@ -1,0 +1,21 @@
+.env
+.env.local
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+.DS_Store
+artifacts/
+*.egg-info/
+dist/
+data/
+training/out/
+checkpoints/
+.superpowers/
+.code-review-graph/
+
+# Throwaway spike/reference code (see spike/jev/README or the project spec);
+# superseded by jev_ultrafast/, never part of the shipped fork.
+spike/
