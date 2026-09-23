@@ -98,7 +98,7 @@ def decide(state: Mapping, goal: str, history: Sequence[Mapping], *, predict: Pr
     request_state, questions = build_request(goal, past, by_op)
     info = predict(request_state, questions) if questions else {}
     answers = info.get("answers", {})
-    op_answer = _valid(answers["operation"], ops, "operation") if "operation" in answers else _sure(ops[0])
+    op_answer = _valid(answers.get("operation", {}), ops, "operation") if len(ops) > 1 else _sure(ops[0])
     operation = op_answer["choice"]
     target_answer = _pick_target(answers, operation, by_op[operation])
     target = target_answer["choice"]

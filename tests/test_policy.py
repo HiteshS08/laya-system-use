@@ -62,6 +62,21 @@ def test_invalid_answer_is_rejected():
         policy.decide(page(*EL), "search", [], predict=bad)
 
 
+def test_missing_operation_answer_is_rejected_when_the_question_was_asked():
+    # EL's e1/e2 share one node, so element "1" supports both TYPE_TEXT and CLICK, and element
+    # "2" (e3) supports CLICK too: by_op["CLICK"] = ["1", "2"], by_op["TYPE_TEXT"] = ["1"], so
+    # the operation question IS asked (len(ops) == 2 > 1). The mocked response is well-formed
+    # for click_target (a valid answer over ids "1"/"2") but omits the "operation" key
+    # entirely, simulating a malformed/truncated Laya reply. This must raise, not silently fall
+    # back to the first operation ("CLICK") with confidence 1.0 — if it fell back, click_target
+    # validation would succeed too (both "1" and "2" are valid CLICK targets), so only
+    # validating the operation answer itself can catch this bug.
+    missing = Mock(return_value={"answers": {"click_target": answer(["1", "2"], "2")},
+                                  "model": "m", "usage": {}})
+    with pytest.raises(ValueError, match="Invalid Laya answer"):
+        policy.decide(page(*EL), "search", [], predict=missing)
+
+
 def test_select_uses_laya_for_the_dropdown_and_the_text_model_for_the_option():
     select = [
         {"id": "s1", "kind": "select", "label": "Sort → Price", "role": "combobox", "value": "price",
