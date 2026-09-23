@@ -151,10 +151,13 @@ def test_quoted_task_text_still_uses_the_llm(monkeypatch):
     assert sent["goal"] == 'Fly from "Zurich" to London'
 
 
-def test_missing_text_credential_stops_before_guessing(monkeypatch):
-    monkeypatch.delenv("TEXT_MODEL_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="TEXT_MODEL_API_KEY"):
-        model.field_text({"goal": 'Enter "Zurich"'})
+def test_text_helper_needs_no_credential_for_the_local_server(monkeypatch):
+    for name in ("TEXT_MODEL_API_KEY", "TEXT_MODEL_BASE_URL", "TEXT_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    post = Mock(return_value={"choices": [{"message": {"content": '{"text":"Zurich"}'}}]})
+    monkeypatch.setattr(model, "post_json", post)
+    assert model.field_text({"goal": 'Enter "Zurich"'})[0] == "Zurich"
+    assert post.call_args.args[0].startswith("http://127.0.0.1:")
 
 
 @pytest.fixture
