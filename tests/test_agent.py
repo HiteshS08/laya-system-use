@@ -10,6 +10,7 @@ import pytest
 from jev_ultrafast import agent as loop
 from jev_ultrafast import model
 from jev_ultrafast.browser import StalePage, browser_operation, fingerprint
+from jev_ultrafast.verifier import Verdict
 
 
 def page():
@@ -321,3 +322,24 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_verifier_can_finish_the_run_after_a_page_change(runner, monkeypatch):
+    monkeypatch.setenv("POLICY_BACKEND", "laya")
+    monkeypatch.setattr(loop, "field_text", Mock(return_value=("book", {"model": "test", "latency_ms": 1})))
+    monkeypatch.setattr(loop, "completion_verdict", Mock(return_value=Verdict(True, "results visible", 5)))
+    runner.state["browser"].observe.return_value = {**page(), "fingerprint": "changed"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["status"] == "done"
+    assert runner.state["verdicts"][0]["done"] is True
+
+
+def test_verifier_is_not_consulted_for_the_hosted_backend(runner, monkeypatch):
+    monkeypatch.delenv("POLICY_BACKEND", raising=False)
+    monkeypatch.setattr(loop, "field_text", Mock(return_value=("book", {"model": "test", "latency_ms": 1})))
+    spy = Mock()
+    monkeypatch.setattr(loop, "completion_verdict", spy)
+    runner.state["browser"].observe.return_value = {**page(), "fingerprint": "changed"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    spy.assert_not_called()
+    assert runner.state["status"] == "ready"
