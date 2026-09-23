@@ -59,3 +59,11 @@ def build_request(
                 "criteria": {c.id: render_option(c) for c in candidates_by_op[op]},
             }
     return state, questions
+
+
+def history_strings(history: Sequence[Mapping]) -> list[str]:
+    """Jev history entries -> the same strings training used (see render_history_item)."""
+    return [
+        render_history_item(h.get("operation") or h["kind"].upper(), h["action"], h.get("text") or "")
+        for h in history
+    ]

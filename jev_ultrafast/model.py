@@ -79,6 +79,10 @@ def action_space(actions):
 
 
 def choose(state, goal, history):
+    if os.environ.get("POLICY_BACKEND") == "laya":
+        from .policy import decide  # lazy: policy imports this module
+
+        return decide(state, goal, history)
     elements, targets, controls = action_space(state["actions"])
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
