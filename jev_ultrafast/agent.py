@@ -1,12 +1,15 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import os
 import time
+from dataclasses import asdict
 from pathlib import Path
 
 from .browser import Browser, StalePage
 from .model import action_space, choose, field_context, field_text
 from .questions import MAX_STEPS
+from .verifier import completion_verdict
 
 
 class Agent:
@@ -156,6 +159,14 @@ class Agent:
                 if len(repeated) == 3 and all(h["page_changed"] is False and h["kind"] != "wait" for h in repeated)
                 else "ready"
             )
+            if state["status"] == "ready" and os.environ.get("POLICY_BACKEND") == "laya":
+                verdict = completion_verdict(state)
+                if verdict:
+                    state["verdicts"] = [*state.get("verdicts", []), asdict(verdict)]
+                    if verdict.done:
+                        state["status"] = "done"
+                        state["plan_index"] = 1
+                        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         else:
             raise ValueError("Unknown command")
         return self.snapshot()
