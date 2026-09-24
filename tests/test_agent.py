@@ -403,3 +403,19 @@ def test_planner_backend_creates_a_pilot(monkeypatch):
     assert agent.pilot is not None and agent.pilot.goal == "Find a book"
     monkeypatch.setenv("POLICY_BACKEND", "laya")
     assert loop.Agent("https://example.test/", "Find a book").pilot is None
+
+
+def test_link_click_waits_for_client_side_navigation(monkeypatch):
+    from jev_ultrafast import browser as b
+
+    urls = iter(["https://github.com/r", "https://github.com/r", "https://github.com/r/issues"])
+    br = b.Browser.__new__(b.Browser)
+    br.session = "s"
+    br.after_input = {"kind": "click", "node": 1, "href": "https://github.com/r/issues",
+                      "page_url": "https://github.com/r"}
+    br.call = Mock()
+    br.evaluate = Mock(side_effect=lambda expr: next(urls) if expr == "location.href" else None)
+    monkeypatch.setattr(b, "browser_operation", Mock(return_value={"url": "https://github.com/r/issues"}))
+    monkeypatch.setattr(b.time, "sleep", Mock())
+    br.observe(screenshot=False)
+    assert br.evaluate.call_count == 3

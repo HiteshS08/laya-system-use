@@ -30,6 +30,15 @@ SCROLL_TO_TEXT = """(needle => {
   return false;
 })"""
 
+NAVIGATION_WAIT_S = 3.0
+
+
+def _navigates(action) -> bool:
+    """A link to another document: client-side routers (GitHub Turbo) change the URL after the click returns."""
+    href, current = action.get("href") or "", action.get("page_url") or ""
+    return href.startswith(("http://", "https://")) and href.split("#")[0] != current.split("#")[0]
+
+
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
@@ -67,6 +76,10 @@ class Browser:
     def observe(self, screenshot=True):
         if getattr(self, "after_input", None):
             action, self.after_input = self.after_input, None
+            if action["kind"] == "click" and _navigates(action):
+                deadline = time.monotonic() + NAVIGATION_WAIT_S
+                while time.monotonic() < deadline and self.evaluate("location.href") == action["page_url"]:
+                    time.sleep(0.05)
             # This is read-only and happens after execution was logged, even if navigation interrupts it.
             try:
                 self.call(
@@ -126,7 +139,7 @@ class Browser:
         if action["kind"] == "wait":
             time.sleep(0.1)
         result = browser_operation({"operation": "act", "session": self.session, "action": action, "text": text})
-        self.after_input = action if action["kind"] != "wait" else None
+        self.after_input = {**action, "page_url": page["url"]} if action["kind"] != "wait" else None
         return result
 
     def close(self):
