@@ -128,3 +128,58 @@ def test_stall_without_progress_blocks():
     p, _ = pilot([cont(CLICK_GO)] * 10)
     history = [done_entry(f"Thing {i}", changed=False) for i in range(4)]
     assert p.decide(page(), history)["choice"] == "BLOCKED"
+
+
+def test_unexecuted_step_is_requeued_not_lost():
+    # StalePage: the Agent can re-decide without ever appending the previous decision to history.
+    p, plan_fn = pilot([cont(TYPE_ADA, CLICK_GO)])
+    d1 = p.decide(page(), [])
+    d2 = p.decide(page(), [])
+    assert d1["choice"] == "e1" and d2["choice"] == "e1"
+    assert plan_fn.call_count == 1
+
+
+def test_progress_within_the_stall_window_is_not_blocked():
+    # 4 actions where the first one completed a step: not a stall, spec 5.6's window is 4 actions wide.
+    actions = [
+        {"id": "e1", "kind": "click", "label": "Go", "role": "button", "node": 1},
+        {"id": "e2", "kind": "click", "label": "Next", "role": "button", "node": 2},
+        {"id": "e3", "kind": "click", "label": "Continue", "role": "button", "node": 3},
+        {"id": "e4", "kind": "click", "label": "Submit", "role": "button", "node": 4},
+    ]
+    pg = {"url": URL, "title": "Example", "text": "Search the site", "outline": "", "actions": actions}
+    go = PlanStep("CLICK", "Go", "", "Click Go.")
+    nxt = PlanStep("CLICK", "Next", "", "Click Next.")
+    keep_going = PlanStep("CLICK", "Continue", "", "Click Continue.")
+    submit = PlanStep("CLICK", "Submit", "", "Click Submit.")
+    p, _ = pilot([cont(go), cont(nxt), cont(keep_going), cont(submit), Plan("done", "Search the site", ())])
+    p.decide(pg, [])
+    p.decide(pg, [done_entry("Go", changed=True)])
+    p.decide(pg, [done_entry("Go", changed=True), done_entry("Next", changed=False)])
+    p.decide(pg, [done_entry("Go", changed=True), done_entry("Next", changed=False),
+                  done_entry("Continue", changed=False)])
+    d = p.decide(pg, [done_entry("Go", changed=True), done_entry("Next", changed=False),
+                       done_entry("Continue", changed=False), done_entry("Submit", changed=False)])
+    assert d["choice"] != "BLOCKED"
+
+
+def test_planner_failure_is_remembered_per_url():
+    fallback = Mock(return_value={"choice": "wait", "operation": "WAIT", "probabilities": {"wait": 1.0}})
+    p, plan_fn = pilot([ValueError("no valid plan"), cont(CLICK_GO)], fallback=fallback)
+    d1 = p.decide(page(), [])
+    d2 = p.decide(page(), [])
+    assert plan_fn.call_count == 1
+    assert d1["route"] == "planner_fallback" and d2["route"] == "planner_fallback"
+    d3 = p.decide(page(url=URL + "other"), [])
+    assert plan_fn.call_count == 2 and d3["choice"] == "e3"
+
+
+def test_unroutable_notes_are_not_duplicated():
+    select = PlanStep("SELECT", "Country", "India", "Select India in Country.")
+    fallback = Mock(return_value={"choice": "wait", "operation": "WAIT", "probabilities": {"wait": 1.0}})
+    p, plan_fn = pilot([cont(select), cont(select), cont(CLICK_GO)], fallback=fallback)
+    p.decide(page(), [])
+    d = p.decide(page(), [])
+    assert plan_fn.call_count == 3
+    assert plan_fn.call_args.args[4].count("SELECT Country (no matching element)") == 1
+    assert d["choice"] == "e3"

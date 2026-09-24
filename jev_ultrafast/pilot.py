@@ -33,17 +33,21 @@ class Pilot:
         self._planned_at = 0  # attempts known when the current queue was planned
         self._completed: list[str] = []
         self._completed_at: list[int] = []  # len(completed) after each executed action
-        self._pending: tuple[int, str] | None = None  # (history index, instruction) of the last decision
+        self._pending: tuple[int, PlanStep] | None = None  # (history index, step) of the last decision
         self._unroutable: dict[str, list[str]] = {}
+        self._planner_failed: set[str] = set()  # urls where the planner raised; skip straight to fallback there
 
     def decide(self, page: Mapping, history: Sequence[Mapping]) -> dict:
         started = time.perf_counter()
+        self._requeue_unexecuted(len(history))
         self._absorb(history)
         if self._stalled():
             return self._stop("BLOCKED", "", started)
         elements, targets, _ = action_space(prune_actions(page["actions"], self.goal))
         for _ in range(MAX_PLANS_PER_DECISION):
             if self._needs_plan(page):
+                if page["url"] in self._planner_failed:
+                    break
                 outcome = self._replan(page, elements)
                 if outcome is None:
                     break
@@ -52,28 +56,41 @@ class Pilot:
             step, self._queue = self._queue[0], self._queue[1:]
             decision = self._step_decision(step, page, elements, targets, history, started)
             if decision is not None:
-                self._pending = (len(history), step.instruction)
+                self._pending = (len(history), step)
                 return decision
-            self._unroutable.setdefault(page["url"], []).append(
-                f"{step.operation} {step.target_text} (no matching element)")
+            self._note_unroutable(page["url"], step)
             self._queue = ()
         return self._fall_back(page, history)
+
+    def _requeue_unexecuted(self, history_len: int) -> None:
+        # The previous decision was never executed (no history entry appended for it): put it back.
+        if self._pending is not None and self._pending[0] == history_len:
+            _, step = self._pending
+            self._queue = (step, *self._queue)
+            self._pending = None
+
+    def _note_unroutable(self, url: str, step: PlanStep) -> None:
+        note = f"{step.operation} {step.target_text} (no matching element)"
+        notes = self._unroutable.setdefault(url, [])
+        if note not in notes:
+            notes.append(note)
 
     def _absorb(self, history: Sequence[Mapping]) -> None:
         known = len(self.memory.attempts)
         self.memory.sync(history)
         if self._pending and self._pending[0] < len(history):
-            index, instruction = self._pending
+            index, step = self._pending
             if self.memory.attempts[index].outcome != "no_change" or \
                     self.memory.attempts[index].operation == "TYPE_TEXT":
-                self._completed.append(instruction)
+                self._completed.append(step.instruction)
             self._pending = None
         self._completed_at.extend([len(self._completed)] * (len(self.memory.attempts) - known))
 
     def _stalled(self) -> bool:
         if self.memory.streak_without_url_change() < STALL_ACTIONS or len(self._completed_at) < STALL_ACTIONS:
             return False
-        return self._completed_at[-1] == self._completed_at[-STALL_ACTIONS]
+        before = self._completed_at[-STALL_ACTIONS - 1] if len(self._completed_at) > STALL_ACTIONS else 0
+        return self._completed_at[-1] == before
 
     def _needs_plan(self, page: Mapping) -> bool:
         new_failure = self.memory.last_failed() and len(self.memory.attempts) > self._planned_at
@@ -86,6 +103,7 @@ class Pilot:
         except (ValueError, RuntimeError) as exc:
             log.warning("planner failed on %s: %s", page["url"], exc)
             self.plans.append({"url": page["url"], "error": str(exc)})
+            self._planner_failed.add(page["url"])
             return None
         self.plans.append({"url": page["url"], "status": result.status, "evidence": result.evidence,
                            "steps": [asdict(s) for s in result.steps], "latency_ms": result.latency_ms,
