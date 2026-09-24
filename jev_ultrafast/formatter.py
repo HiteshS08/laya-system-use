@@ -7,6 +7,8 @@ from .candidates import OPERATIONS, Candidate
 MAX_LABEL_CHARS = 70
 MAX_VALUE_CHARS = 20
 RECENT_ACTIONS = 3
+SECTION_CHARS = 40
+ROW_CHARS = 60
 
 OPERATION_HELP = {
     "CLICK": "click a link, button, option or other control",
@@ -25,13 +27,21 @@ def _clean(text: str, limit: int) -> str:
     return " ".join(text.split())[:limit]
 
 
-def render_option(candidate: Candidate) -> str:
+def context_text(landmark: str, section: str = "", row_text: str = "") -> str:
+    """Where an element sits: identical rules for live pages and Mind2Web (see snapshot.js, training/mind2web.py)."""
+    text = " > ".join(p for p in (landmark, _clean(section, SECTION_CHARS)) if p)
+    row = _clean(row_text, ROW_CHARS)
+    return f"{text} · row: {row}" if row else text
+
+
+def render_option(candidate: Candidate, with_context: bool = False) -> str:
     label = _clean(candidate.label, MAX_LABEL_CHARS) or candidate.role or "unnamed"
     extras = [candidate.role] if candidate.role else []
     value = _clean(candidate.value, MAX_VALUE_CHARS)
     if value:
         extras.append(f"={value}")
-    return f"{label} ({', '.join(extras)})" if extras else label
+    text = f"{label} ({', '.join(extras)})" if extras else label
+    return f"{text} [{candidate.context}]" if with_context and candidate.context else text
 
 
 def render_history_item(op: str, label: str, value: str = "") -> str:

@@ -1,5 +1,20 @@
 from jev_ultrafast.candidates import Candidate
-from jev_ultrafast.formatter import build_request, render_history_item, render_option
+from jev_ultrafast.formatter import build_request, context_text, render_history_item, render_option
+
+
+def test_context_text_joins_landmark_section_and_row_with_limits():
+    assert context_text("main", "From today's featured article") == "main > From today's featured article"
+    assert context_text("nav") == "nav"
+    assert context_text("", "", "") == ""
+    long = context_text("main", "S" * 100, "R" * 100)
+    assert long == "main > " + "S" * 40 + " · row: " + "R" * 60
+
+
+def test_render_option_appends_context_only_when_asked():
+    c = Candidate("1", "Mary Mallon", "link", context="main > From today's featured article")
+    assert render_option(c) == "Mary Mallon (link)"
+    assert render_option(c, with_context=True) == "Mary Mallon (link) [main > From today's featured article]"
+    assert render_option(Candidate("2", "Go", "button"), with_context=True) == "Go (button)"
 
 
 def cand(i, label="Go", role="button", value="", ops=("CLICK",)):

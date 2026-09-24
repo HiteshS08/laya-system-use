@@ -12,3 +12,4 @@ class Candidate:
     role: str
     value: str = ""
     ops: frozenset[str] = frozenset({"CLICK"})
+    context: str = ""

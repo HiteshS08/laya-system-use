@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import lru_cache
 
 from .candidates import OPERATIONS, Candidate
-from .formatter import build_request, history_strings
+from .formatter import build_request, context_text, history_strings
 from .model import action_space, validate_choice
 from .shortlister import shortlist
 from .textmodel import choose_option
@@ -30,7 +30,8 @@ def laya_predict(state: dict, questions: dict) -> dict:
 
 def candidates_from(elements: Sequence[Mapping]) -> list[Candidate]:
     return [
-        Candidate(e["index"], e["label"], e.get("role", ""), str(e.get("value") or ""), frozenset(e["operations"]))
+        Candidate(e["index"], e["label"], e.get("role", ""), str(e.get("value") or ""), frozenset(e["operations"]),
+                  context_text(e.get("landmark", ""), e.get("section", ""), e.get("row_text", "")))
         for e in elements
     ]
 
