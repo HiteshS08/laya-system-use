@@ -122,7 +122,7 @@ def test_plan_records_prompt_tokens_and_sends_compact_json():
     assert p.prompt_tokens == 812
     sent = complete.call_args.args[1]
     assert ", " not in sent[:40] and '": ' not in sent
-    assert complete.call_args.kwargs["max_tokens"] == 160
+    assert complete.call_args.kwargs["max_tokens"] == 256
 
 
 def test_pick_returns_an_offered_id_or_none():

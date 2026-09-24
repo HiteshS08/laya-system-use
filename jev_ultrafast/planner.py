@@ -173,7 +173,7 @@ def plan(goal: str, page: Mapping, elements: Sequence[Mapping], completed: Seque
     last: ValueError | None = None
     user_message = payload
     for _ in range(2):
-        output, meta = complete(PLANNER_SYSTEM, user_message, max_tokens=160, extra=DISABLE_THINKING)
+        output, meta = complete(PLANNER_SYSTEM, user_message, max_tokens=256, extra=DISABLE_THINKING)
         try:
             parsed = parse_plan(output, page)
         except ValueError as exc:
