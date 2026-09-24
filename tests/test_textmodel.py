@@ -76,3 +76,11 @@ def test_choose_option_requires_an_offered_option(monkeypatch):
         textmodel.choose_option("goal", "Colour", ["Red", "Blue"])
     sent = json.loads(model.post_json.call_args.args[2]["messages"][1]["content"])
     assert sent["options"] == ["Red", "Blue"]
+
+
+def test_extra_fields_are_merged_into_the_request(monkeypatch):
+    post = Mock(return_value=reply('{"a": 1}'))
+    monkeypatch.setattr(model, "post_json", post)
+    textmodel.complete_json("sys", "user", extra={"chat_template_kwargs": {"enable_thinking": False}})
+    body = post.call_args.args[2]
+    assert body["chat_template_kwargs"] == {"enable_thinking": False} and body["temperature"] == 0

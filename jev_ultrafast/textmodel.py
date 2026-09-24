@@ -4,7 +4,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from . import model as _model
 
@@ -36,7 +36,8 @@ def extract_json(raw: str) -> dict:
     return parsed
 
 
-def complete_json(system: str, user: str, *, max_tokens: int = 256) -> tuple[dict, dict]:
+def complete_json(system: str, user: str, *, max_tokens: int = 256,
+                  extra: Mapping | None = None) -> tuple[dict, dict]:
     base = os.environ.get("TEXT_MODEL_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     name = os.environ.get("TEXT_MODEL", DEFAULT_MODEL)
     key = os.environ.get("TEXT_MODEL_API_KEY", "local")
@@ -46,6 +47,7 @@ def complete_json(system: str, user: str, *, max_tokens: int = 256) -> tuple[dic
     body = {
         "model": name, "max_tokens": max_tokens, "temperature": 0,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        **(extra or {}),
     }
     started = time.perf_counter()
     last_error: Exception | None = None
