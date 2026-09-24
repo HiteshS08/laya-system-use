@@ -25,6 +25,26 @@
     'option','gridcell','combobox','textbox','searchbox','spinbutton'];
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
     roles.map(role=>'[role="'+role+'"]').join(',');
+  const LANDMARK_ROLES={navigation:'nav',banner:'header',contentinfo:'footer',complementary:'aside',
+    main:'main',form:'form',search:'form',dialog:'dialog'};
+  const LANDMARK_TAGS={NAV:'nav',HEADER:'header',FOOTER:'footer',ASIDE:'aside',MAIN:'main',FORM:'form',
+    DIALOG:'dialog'};
+  const squash=(t,n)=>(t||'').replace(/\s+/g,' ').trim().slice(0,n);
+  const landmark=e=>{
+    for (let n=e.parentElement;n;n=n.parentElement) {
+      const r=LANDMARK_ROLES[n.getAttribute('role')];
+      if (r) return r;
+      if (LANDMARK_TAGS[n.tagName]) return LANDMARK_TAGS[n.tagName];
+    }
+    return 'main';
+  };
+  // querySelectorAll returns document order, so the last heading seen precedes each element.
+  const sections=new Map(); let heading='';
+  for (const n of document.body.querySelectorAll('h1,h2,h3,h4,h5,h6,'+selector)) {
+    if (/^H[1-6]$/.test(n.tagName)) heading=squash(n.textContent,80);
+    if (n.matches(selector)) sections.set(n,heading);
+  }
+  const rowText=e=>squash(e.parentElement?.closest('li,tr')?.textContent,80);
   const role = e => {
     const explicit=e.getAttribute('role');
     if (roles.includes(explicit)) return explicit;
@@ -56,10 +76,16 @@
   for (const e of document.querySelectorAll(selector)) {
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
-    if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
+    // Whole document: vertical position no longer filters; horizontally hidden carousels still do.
+    if (!rname || r.width<=0 || r.height<=0 || x<0 || x>=innerWidth || y+scrollY<0) continue;
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
+    const mark=landmark(e);
     const base={node:identity(e),role:rname,label:name(e)||rname,
-      rect:{x:r.x,y:r.y,w:r.width,h:r.height}};
+      rect:{x:r.x,y:r.y,w:r.width,h:r.height},
+      in_viewport:y>=0 && y<innerHeight, y:Math.round(y+scrollY),
+      href:e.tagName==='A' ? e.href : '', landmark:mark,
+      section:['nav','header','footer'].includes(mark) ? '' : (sections.get(e)||''),
+      row_text:rowText(e)};
     for (const key of ['checked','selected','expanded']) {
       const value=e.getAttribute('aria-'+key);
       if (value!==null) base[key]=value;
@@ -96,12 +122,14 @@
   const semantics=actions.map(({rect,...action})=>action);
   const marker=[performance.timeOrigin,location.href,scrollX,scrollY,innerWidth,innerHeight,
     document.title,text,semantics,page_key[6]];
-  const omitted_actions=Math.max(0,actions.length-250);
-  actions.splice(250);
+  const omitted_actions=Math.max(0,actions.length-400);
+  actions.splice(400);
   actions.forEach((a,i)=>a.id='e'+(i+1));
   if (scrollY+innerHeight<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
   if (scrollY>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
-  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,
+  const outline=[...document.querySelectorAll('h1,h2,h3')].map(h=>squash(h.textContent,80))
+    .filter(Boolean).join(' | ').slice(0,1000);
+  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,outline,
     scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};
 })()

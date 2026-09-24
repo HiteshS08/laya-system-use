@@ -47,6 +47,10 @@ def validate_choice(answer, ids):
     return answer
 
 
+ELEMENT_FIELDS = ("role", "value", "checked", "selected", "expanded", "in_viewport", "y", "href", "landmark",
+                  "section", "row_text", "aliases")
+
+
 def action_space(actions):
     """One index per observed element; each operation has its own valid target choices."""
     elements, indices, targets, controls = [], {}, {}, {}
@@ -60,7 +64,7 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ELEMENT_FIELDS if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")

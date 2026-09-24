@@ -75,6 +75,16 @@ def test_one_index_per_node_with_operation_specific_targets():
     assert "WAIT" in controls
 
 
+def test_action_space_keeps_context_fields():
+    p = page()
+    p["actions"][2].update(landmark="nav", section="", row_text="", href="https://example.test/go",
+                           in_viewport=False, y=1200, aliases=["Go now"])
+    elements, _, _ = model.action_space(p["actions"])
+    go = elements[1]
+    assert (go["landmark"], go["href"], go["in_viewport"], go["y"], go["aliases"]) == (
+        "nav", "https://example.test/go", False, 1200, ["Go now"])
+
+
 def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):
     calls = []
 
