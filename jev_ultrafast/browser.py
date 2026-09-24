@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 from browser_harness.admin import ensure_daemon
@@ -33,7 +34,7 @@ SCROLL_TO_TEXT = """(needle => {
 NAVIGATION_WAIT_S = 3.0
 
 
-def _navigates(action) -> bool:
+def _navigates(action: Mapping) -> bool:
     """A link to another document: client-side routers (GitHub Turbo) change the URL after the click returns."""
     href, current = action.get("href") or "", action.get("page_url") or ""
     return href.startswith(("http://", "https://")) and href.split("#")[0] != current.split("#")[0]
@@ -78,7 +79,14 @@ class Browser:
             action, self.after_input = self.after_input, None
             if action["kind"] == "click" and _navigates(action):
                 deadline = time.monotonic() + NAVIGATION_WAIT_S
-                while time.monotonic() < deadline and self.evaluate("location.href") == action["page_url"]:
+                while time.monotonic() < deadline:
+                    try:
+                        if self.evaluate("location.href") != action["page_url"]:
+                            break
+                    except (StalePage, RuntimeError):
+                        # Navigation is already in progress and tore down the JS context; the
+                        # browser_operation StalePage retry loop below picks it up.
+                        break
                     time.sleep(0.05)
             # This is read-only and happens after execution was logged, even if navigation interrupts it.
             try:

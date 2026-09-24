@@ -419,3 +419,18 @@ def test_link_click_waits_for_client_side_navigation(monkeypatch):
     monkeypatch.setattr(b.time, "sleep", Mock())
     br.observe(screenshot=False)
     assert br.evaluate.call_count == 3
+
+
+def test_link_click_tolerates_context_loss_while_waiting(monkeypatch):
+    from jev_ultrafast import browser as b
+
+    br = b.Browser.__new__(b.Browser)
+    br.session = "s"
+    br.after_input = {"kind": "click", "node": 1, "href": "https://github.com/r/issues",
+                      "page_url": "https://github.com/r"}
+    br.call = Mock()
+    br.evaluate = Mock(side_effect=RuntimeError("Cannot find context with specified id"))
+    monkeypatch.setattr(b, "browser_operation", Mock(return_value={"url": "https://github.com/r/issues"}))
+    monkeypatch.setattr(b.time, "sleep", Mock())
+    br.observe(screenshot=False)
+    assert br.evaluate.call_count == 1
