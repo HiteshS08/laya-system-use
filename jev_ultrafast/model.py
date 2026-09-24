@@ -167,6 +167,17 @@ def field_context(goal, action, page, history):
     }
 
 
+LITERAL_NON_VALUES = frozenset({"false", "true", "null", "none"})
+
+
+def valid_text_value(value: object) -> str:
+    """A string a person would type. JSON literals rendered as text ("false") are model mistakes, not values."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 2000 or \
+            value.strip().casefold() in LITERAL_NON_VALUES:
+        raise ValueError(f"Text value {value!r} is not text to enter; nothing typed.")
+    return value
+
+
 def field_text(context):
     from .textmodel import complete_json  # lazy: textmodel imports this module
 
@@ -175,6 +186,7 @@ def field_text(context):
     except ValueError as exc:
         raise ValueError("Text helper returned no valid field value; nothing typed.") from exc
     value = output.get("text")
-    if set(output) != {"text"} or not isinstance(value, str) or not value.strip() or len(value) > 2000:
+    if set(output) != {"text"}:
         raise ValueError("Text helper returned no valid field value; nothing typed.")
+    value = valid_text_value(value)
     return value, meta

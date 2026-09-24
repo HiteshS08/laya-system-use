@@ -176,6 +176,7 @@ def runner():
     a = loop.Agent.__new__(loop.Agent)
     a.screenshots = False
     a.pending_text = None
+    a.pilot = None
     p = page()
     a.state = {
         "browser": Mock(fresh=Mock(return_value=True), observe=Mock(return_value=p)),
@@ -353,3 +354,52 @@ def test_verifier_is_not_consulted_for_the_hosted_backend(runner, monkeypatch):
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     spy.assert_not_called()
     assert runner.state["status"] == "ready"
+
+
+def test_planned_value_is_typed_without_the_text_helper(runner, monkeypatch):
+    helper = Mock(side_effect=AssertionError("text helper must not run"))
+    monkeypatch.setattr(loop, "field_text", helper)
+    runner.state["decision"] = {**decision(), "value": "Ada Lovelace", "route": "resolver", "instruction": "Type"}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    browser = runner.state["browser"]
+    assert browser.act.call_args.kwargs["text"] == "Ada Lovelace"
+    entry = runner.state["history"][-1]
+    assert (entry["text"], entry["route"], entry["url_before"]) == ("Ada Lovelace", "resolver", "https://example.test/")
+
+
+def test_tool_decision_runs_the_tool_and_is_recorded(runner, monkeypatch):
+    run_tool = Mock(return_value=True)
+    monkeypatch.setattr(loop, "run_tool", run_tool)
+    runner.state["decision"] = {**decision("TOOL"), "operation": "SCROLL_TO_TEXT", "route": "planner",
+                                "tool": {"operation": "SCROLL_TO_TEXT", "arg": "External links"},
+                                "probabilities": {"TOOL": 1.0}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links")
+    entry = runner.state["history"][-1]
+    assert (entry["kind"], entry["operation"], entry["action"]) == ("tool", "SCROLL_TO_TEXT", "External links")
+    assert runner.state["status"] == "ready"
+
+
+def test_rejected_tool_is_recorded_as_a_step_without_effect(runner, monkeypatch):
+    monkeypatch.setattr(loop, "run_tool", Mock(side_effect=ValueError("not a registered search URL")))
+    runner.state["decision"] = {**decision("TOOL"), "operation": "GOTO", "route": "planner",
+                                "tool": {"operation": "GOTO", "arg": "https://evil.test/"},
+                                "probabilities": {"TOOL": 1.0}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["history"][-1]["page_changed"] is False
+
+
+@pytest.mark.parametrize("value", [False, None, "", "   ", "false", "True", "null", "None", "x" * 2001])
+def test_literal_or_empty_values_are_never_typed(value):
+    with pytest.raises(ValueError, match="nothing typed"):
+        model.valid_text_value(value)
+
+
+def test_planner_backend_creates_a_pilot(monkeypatch):
+    monkeypatch.setenv("POLICY_BACKEND", "planner")
+    browser = Mock(observe=Mock(return_value=page()))
+    monkeypatch.setattr(loop, "Browser", Mock(return_value=browser))
+    agent = loop.Agent("https://example.test/", "Find a book")
+    assert agent.pilot is not None and agent.pilot.goal == "Find a book"
+    monkeypatch.setenv("POLICY_BACKEND", "laya")
+    assert loop.Agent("https://example.test/", "Find a book").pilot is None

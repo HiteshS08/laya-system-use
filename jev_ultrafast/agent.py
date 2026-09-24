@@ -1,15 +1,20 @@
 """The complete agent loop. Typed choices, observable state, bounded execution."""
 
 import base64
+import logging
 import os
 import time
 from dataclasses import asdict
 from pathlib import Path
 
 from .browser import Browser, StalePage
-from .model import action_space, choose, field_context, field_text
+from .model import action_space, choose, field_context, field_text, valid_text_value
+from .pilot import Pilot
 from .questions import MAX_STEPS
+from .tools import run_tool
 from .verifier import completion_verdict
+
+log = logging.getLogger("agent")
 
 
 class Agent:
@@ -19,6 +24,7 @@ class Agent:
             raise ValueError("Supply a task")
         plan = [task]
         self.pending_text = None
+        self.pilot = Pilot(task) if os.environ.get("POLICY_BACKEND") == "planner" else None
         self.browser = Browser(url)
         self.record_dir = Path(record_dir) if record_dir else None
         self.screenshots = screenshots or bool(record_dir)
@@ -77,7 +83,8 @@ class Agent:
                 raise ValueError("This run has stopped. Start a fresh demo.")
             if len(state["decisions"]) >= MAX_STEPS * 2:
                 raise ValueError("Reached the demo's model-call budget")
-            state["decision"] = choose(state["page"], state["goal"], state["history"])
+            state["decision"] = (self.pilot.decide(state["page"], state["history"]) if self.pilot
+                                 else choose(state["page"], state["goal"], state["history"]))
             state["decisions"].append(
                 {
                     **state["decision"],
@@ -101,12 +108,16 @@ class Agent:
                 state["plan_index"] = int(selected == "DONE")
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                 return self.snapshot()
+            if decision.get("tool"):
+                return self._act_tool(decision, page)
             action = next(a for a in page["actions"] if a["id"] == selected)
             if len(state["history"]) >= MAX_STEPS:
                 state["status"] = "blocked"
                 raise ValueError(f"Stopped at the {MAX_STEPS}-action demo budget")
             text, helper = None, None
-            if action["kind"] == "fill":
+            if action["kind"] == "fill" and decision.get("value") is not None:
+                text = valid_text_value(decision["value"])
+            elif action["kind"] == "fill":
                 if not state["browser"].fresh(page):
                     raise StalePage("Page changed before text generation. Choose again.")
                 context = field_context(state["goal"], action, page, state["history"])
@@ -137,6 +148,9 @@ class Agent:
                     "target": decision["target"],
                     "page_changed": None,
                     "url": page["url"],
+                    "url_before": page["url"],
+                    "route": decision.get("route"),
+                    "instruction": decision.get("instruction"),
                     "usage": decision["usage"],
                     "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
                     "elapsed_ms": state["elapsed_ms"],
@@ -169,6 +183,31 @@ class Agent:
                         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         else:
             raise ValueError("Unknown command")
+        return self.snapshot()
+
+    def _act_tool(self, decision, page):
+        state = self.state
+        tool = decision["tool"]
+        try:
+            ran = run_tool(state["browser"], tool["operation"], tool["arg"])
+        except ValueError as exc:
+            log.warning("tool rejected: %s", exc)
+            ran = False
+        state["history"].append({
+            "step": len(state["history"]) + 1, "action": tool["arg"], "kind": "tool", "choice": "TOOL",
+            "probability": 1.0, "confidence": decision["confidence"], "latency_ms": decision["latency_ms"],
+            "text": None, "text_helper": None, "text_latency_ms": 0, "operation": tool["operation"],
+            "target": None, "page_changed": False, "url": page["url"], "url_before": page["url"],
+            "route": decision.get("route"), "instruction": decision.get("instruction"),
+            "usage": {}, "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
+        })
+        if ran:
+            state["page"] = state["browser"].observe(screenshot=self.screenshots)
+            state["history"][-1].update(page_changed=state["page"]["fingerprint"] != page["fingerprint"],
+                                        url=state["page"]["url"])
+        state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
+        state["history"][-1]["elapsed_ms"] = state["elapsed_ms"]
+        state["status"] = "ready"
         return self.snapshot()
 
     def run(self):
