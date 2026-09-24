@@ -19,3 +19,6 @@ checkpoints/
 # Throwaway spike/reference code (see spike/jev/README or the project spec);
 # superseded by jev_ultrafast/, never part of the shipped fork.
 spike/
+
+# Session artifacts
+:memory:*
