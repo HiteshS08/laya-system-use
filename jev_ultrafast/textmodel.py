@@ -40,6 +40,9 @@ def complete_json(system: str, user: str, *, max_tokens: int = 256) -> tuple[dic
     base = os.environ.get("TEXT_MODEL_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     name = os.environ.get("TEXT_MODEL", DEFAULT_MODEL)
     key = os.environ.get("TEXT_MODEL_API_KEY", "local")
+    timeout = float(os.environ.get("TEXT_MODEL_TIMEOUT_SECONDS", "120"))
+    if timeout <= 0:
+        raise ValueError("TEXT_MODEL_TIMEOUT_SECONDS must be positive")
     body = {
         "model": name, "max_tokens": max_tokens, "temperature": 0,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -47,7 +50,7 @@ def complete_json(system: str, user: str, *, max_tokens: int = 256) -> tuple[dic
     started = time.perf_counter()
     last_error: Exception | None = None
     for attempt in (1, 2):
-        result = _model.post_json(base + "/chat/completions", key, body)
+        result = _model.post_json(base + "/chat/completions", key, body, timeout=timeout)
         try:
             output = extract_json(result["choices"][0]["message"]["content"])
         except (KeyError, IndexError, TypeError, ValueError) as exc:

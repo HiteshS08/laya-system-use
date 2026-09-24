@@ -1,6 +1,7 @@
 import json
 from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from jev_ultrafast import model, textmodel
@@ -39,7 +40,7 @@ def test_complete_json_gives_up_after_two_invalid_outputs(monkeypatch):
 
 
 def test_defaults_to_the_local_server_without_any_key(monkeypatch):
-    for name in ("TEXT_MODEL_API_KEY", "TEXT_MODEL_BASE_URL", "TEXT_MODEL"):
+    for name in ("TEXT_MODEL_API_KEY", "TEXT_MODEL_BASE_URL", "TEXT_MODEL", "TEXT_MODEL_TIMEOUT_SECONDS"):
         monkeypatch.delenv(name, raising=False)
     post = Mock(return_value=reply('{"a": 1}'))
     monkeypatch.setattr(model, "post_json", post)
@@ -47,6 +48,24 @@ def test_defaults_to_the_local_server_without_any_key(monkeypatch):
     url, key, body = post.call_args.args
     assert url == "http://127.0.0.1:8080/v1/chat/completions" and key == "local"
     assert body["temperature"] == 0 and body["messages"][1] == {"role": "user", "content": "user"}
+    assert post.call_args.kwargs == {"timeout": 120.0}
+
+
+def test_text_model_timeout_is_configurable_without_changing_policy_timeout(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_TIMEOUT_SECONDS", "75")
+    post = Mock(return_value=reply('{"a": 1}'))
+    monkeypatch.setattr(model, "post_json", post)
+    textmodel.complete_json("sys", "user")
+    assert post.call_args.kwargs == {"timeout": 75.0}
+    with pytest.raises(ValueError, match="must be positive"):
+        monkeypatch.setenv("TEXT_MODEL_TIMEOUT_SECONDS", "0")
+        textmodel.complete_json("sys", "user")
+
+
+def test_transport_timeout_reports_the_endpoint_and_error(monkeypatch):
+    monkeypatch.setattr(model.CLIENT, "post", Mock(side_effect=httpx.ReadTimeout("read timed out")))
+    with pytest.raises(RuntimeError, match=r"127\.0\.0\.1:8080.*ReadTimeout: read timed out"):
+        model.post_json("http://127.0.0.1:8080/v1/chat/completions", "local", {}, timeout=120)
 
 
 def test_choose_option_requires_an_offered_option(monkeypatch):

@@ -12,12 +12,14 @@ from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
 CLIENT = httpx.Client(http2=True, timeout=25)
 
 
-def post_json(url, key, body):
+def post_json(url: str, key: str, body: dict, *, timeout: float | None = None) -> dict:
     for attempt in range(3):
         try:
-            response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"})
-        except httpx.HTTPError:
-            raise RuntimeError("Model connection failed; no action executed.") from None
+            response = CLIENT.post(url, json=body, headers={"Authorization": f"Bearer {key}"},
+                                   timeout=25 if timeout is None else timeout)
+        except httpx.HTTPError as exc:
+            detail = f"Model request to {url} failed: {type(exc).__name__}: {exc}; no action executed."
+            raise RuntimeError(detail) from exc
         if response.status_code in {429, 529, 503} and attempt < 2:
             time.sleep(0.5 * 2**attempt)
             continue

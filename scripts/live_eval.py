@@ -7,62 +7,81 @@ Read-only public sites only. Usage: uv run --env-file .env python scripts/live_e
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
+from evals.live_tasks import TASKS, LiveTask, check_outcome
 from jev_ultrafast import Agent
 
-TASKS = {
-    "wiki_featured": ("https://en.wikipedia.org/wiki/Main_Page", "Open today's featured article."),
-    "wiki_search": (
-        "https://en.wikipedia.org/wiki/Main_Page",
-        "Find and open the Wikipedia article about Gödel's incompleteness theorems.",
-    ),
-    "wiki_long_page": (
-        "https://en.wikipedia.org/wiki/Gödel%27s_incompleteness_theorems",
-        "Open the Wikipedia article about Kurt Gödel, the logician who proved these theorems.",
-    ),
-    "hn_comments": ("https://news.ycombinator.com/", "Open the comments page of the top story."),
-    "gh_issues": ("https://github.com/browser-use/browser-use", "Open the Issues tab of this repository."),
-    "flights": (
-        "https://www.google.com/travel/flights?hl=en",
-        "Find one-way flights from Zurich to London on October 20, 2026, for one adult in economy. "
-        "Stop when matching flight options are visible.",
-    ),
-}
 MAX_STEPS = 12
 OUT = Path("artifacts/live")
 
 
-def run(name: str, url: str, goal: str) -> dict:
+def run(name: str, task: LiveTask, out: Path) -> dict:
     error = None
     started = time.perf_counter()
-    with Agent(url, goal) as agent:
-        try:
-            for _ in range(MAX_STEPS):
-                agent.command("tick")
-                if agent.state["status"] in {"done", "blocked"}:
-                    break
-        except Exception as exc:  # noqa: BLE001 - a live run must always leave its record behind
-            error = f"{type(exc).__name__}: {exc}"
-        state = agent.state
-        record = {
-            "task": name, "goal": goal, "url": url, "status": state["status"], "error": error,
-            "seconds": round(time.perf_counter() - started, 1), "verdicts": state.get("verdicts", []),
-            "steps": [
-                {"n": i + 1, "operation": h.get("operation"), "action": h.get("action"), "text": h.get("text"),
-                 "policy_ms": h.get("latency_ms"), "page_changed": h.get("page_changed"), "url": h.get("url"),
-                 "correct": None}
-                for i, h in enumerate(state["history"])
-            ],
-            "decisions": [{"request": d.get("request"), "choice": d.get("choice")} for d in state["decisions"]],
-            "success": None,
-        }
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / f"{name}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False))
+    record = {"task": name, "category": task.category, "goal": task.goal, "url": task.url,
+              "checks": {"url_regex": task.url_regex, "text_regex": task.text_regex,
+                         "via_url_regex": task.via_url_regex, "min_scroll_y": task.min_scroll_y,
+                         "flight_date": task.flight_date, "flight_origin_regex": task.flight_origin_regex,
+                         "flight_destination_regex": task.flight_destination_regex},
+              "route": "actor_only", "status": "error", "error": None,
+              "seconds": None, "verdicts": [], "steps": [], "decisions": [], "success": False}
+    try:
+        with Agent(task.url, task.goal) as agent:
+            expected_link = None
+            try:
+                expected_link = agent.browser.evaluate(task.expected_link_script) if task.expected_link_script else None
+                if task.expected_link_script and not expected_link:
+                    raise RuntimeError(f"Could not identify the expected link for {name} on the starting page")
+                record["initial_url"] = agent.state["page"]["url"]
+                for _ in range(MAX_STEPS):
+                    agent.command("tick")
+                    if agent.state["status"] in {"done", "blocked"}:
+                        break
+            finally:
+                state = agent.state
+                record.update(
+                    status=state["status"], expected_link=expected_link, verdicts=state.get("verdicts", []),
+                    final_url=state["page"]["url"], final_title=state["page"]["title"],
+                    final_text=state["page"]["text"], final_scroll_y=state["page"]["scroll"]["y"],
+                    final_actions=state["page"].get("actions", []),
+                    success=check_outcome(
+                        task, state["page"]["url"], state["page"]["text"], expected_link,
+                        visited_urls=(record.get("initial_url", task.url),
+                                      *(h["url"] for h in state["history"]), state["page"]["url"]),
+                        scroll_y=state["page"]["scroll"]["y"],
+                        final_actions=state["page"].get("actions", []),
+                    ),
+                    steps=[
+                        {"n": i + 1, "operation": h.get("operation"), "action": h.get("action"),
+                         "text": h.get("text"), "policy_ms": h.get("latency_ms"),
+                         "page_changed": h.get("page_changed"),
+                         "url_before": (record.get("initial_url", task.url) if i == 0
+                                        else state["history"][i - 1]["url"]),
+                         "url_after": h.get("url"),
+                         "correct": None, "failure_tag": None}
+                        for i, h in enumerate(state["history"])
+                    ],
+                    decisions=[{"request": d.get("request"), "answers": d.get("raw_answers"),
+                                "choice": d.get("choice"), "operation": d.get("operation"),
+                                "target": d.get("target"), "confidence": d.get("confidence"),
+                                "target_confidence": d.get("target_confidence"),
+                                "latency_ms": d.get("latency_ms"), "usage": d.get("usage")}
+                               for d in state["decisions"]],
+                )
+    except Exception as exc:  # noqa: BLE001 - a live run must always leave its record behind
+        error = f"{type(exc).__name__}: {exc}"
+    record["error"] = error
+    record["seconds"] = round(time.perf_counter() - started, 1)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{name}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False))
     return record
 
 
 if __name__ == "__main__":
-    for task in sys.argv[1:] or list(TASKS):
-        r = run(task, *TASKS[task])
-        print(f"{task}: status={r['status']} steps={len(r['steps'])} seconds={r['seconds']} error={r['error']}")
+    out = OUT / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    for name in sys.argv[1:] or list(TASKS):
+        r = run(name, TASKS[name], out)
+        print(f"{name}: status={r['status']} success={r['success']} "
+              f"steps={len(r['steps'])} seconds={r['seconds']} error={r['error']}")
