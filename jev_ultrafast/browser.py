@@ -13,6 +13,23 @@ from browser_harness.helpers import cdp
 READ_STATE = Path(__file__).with_name("snapshot.js").read_text()
 MARKER = f"(() => {{ const state={READ_STATE}; return state?.marker ?? null; }})()"
 
+# Headings first (the "External links" heading, not its table-of-contents entry), then any visible text.
+SCROLL_TO_TEXT = """(needle => {
+  const want=needle.toLowerCase().replace(/\\s+/g,' ').trim();
+  if (!want) return false;
+  const shown=e=>e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
+  const has=e=>e.textContent.toLowerCase().replace(/\\s+/g,' ').includes(want);
+  const go=e=>{e.scrollIntoView({block:'center',behavior:'instant'});return true;};
+  for (const h of document.querySelectorAll('h1,h2,h3,h4,h5,h6')) if (has(h) && shown(h)) return go(h);
+  const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n=walker.nextNode())) {
+    const p=n.parentElement;
+    if (p && !p.closest('script,style,noscript,template') && has(n.parentElement) && shown(p)) return go(p);
+  }
+  return false;
+})"""
+
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
@@ -25,12 +42,7 @@ class Browser:
         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
-        self.call("Page.navigate", url=url)
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            if self.evaluate("document.readyState") == "complete":
-                break
-            time.sleep(0.02)
+        self.navigate(url)
 
     def call(self, method, **params):
         return cdp(method, session_id=self.session, **params)
@@ -40,6 +52,17 @@ class Browser:
         if response.get("exceptionDetails"):
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
+
+    def navigate(self, url: str) -> None:
+        self.call("Page.navigate", url=url)
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if self.evaluate("document.readyState") == "complete":
+                break
+            time.sleep(0.02)
+
+    def scroll_to_text(self, text: str) -> bool:
+        return bool(self.evaluate(f"{SCROLL_TO_TEXT}({json.dumps(text)})"))
 
     def observe(self, screenshot=True):
         if getattr(self, "after_input", None):
