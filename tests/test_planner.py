@@ -84,8 +84,20 @@ def test_plan_retries_once_on_an_invalid_plan_then_succeeds():
     assert p.steps[0].target_text == "Mary Mallon" and complete.call_count == 2
     assert p.request_chars > 0
     assert complete.call_args.kwargs["extra"] == planner.DISABLE_THINKING
-    payload = json.loads(complete.call_args.args[1])
+    payload = json.loads(complete.call_args_list[0].args[1])
     assert payload["goal"] == "Open today's featured article."
+
+
+def test_plan_sends_the_validation_error_as_correction_on_retry():
+    outputs = [({"status": "continue", "evidence": "", "steps": []}, {}),
+               ({"status": "continue", "evidence": "", "steps": [step()]}, {})]
+    complete = Mock(side_effect=outputs)
+    p = planner.plan("Open today's featured article.", PAGE, ELEMENTS, [], [], complete=complete)
+    assert p.steps[0].target_text == "Mary Mallon"
+    first_message = complete.call_args_list[0].args[1]
+    second_message = complete.call_args_list[1].args[1]
+    assert second_message.startswith(first_message)
+    assert "Planner said continue but gave no steps" in second_message
 
 
 def test_plan_gives_up_after_two_invalid_plans():
