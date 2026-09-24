@@ -94,6 +94,25 @@ def test_plan_gives_up_after_two_invalid_plans():
         planner.plan("g", PAGE, ELEMENTS, [], [], complete=complete)
 
 
+def test_request_fits_the_prompt_budget_on_a_large_page():
+    many = [el(i, "L" * 70, landmark="main", section="S" * 60, row_text="R" * 90) for i in range(1, 121)]
+    big = {**PAGE, "text": "x" * 6000, "outline": " | ".join(["Heading"] * 200)}
+    payload = json.dumps(planner.planner_view("goal " * 20, big, many, ["done step"] * 12, ["failed"] * 12),
+                         ensure_ascii=False, separators=(",", ":"))
+    # ~4 characters per token: system prompt + payload must stay within ~1,200 tokens.
+    assert len(planner.PLANNER_SYSTEM) + len(payload) <= 4800
+
+
+def test_plan_records_prompt_tokens_and_sends_compact_json():
+    complete = Mock(return_value=({"status": "continue", "evidence": "", "steps": [step()]},
+                                  {"usage": {"prompt_tokens": 812}}))
+    p = planner.plan("Open today's featured article.", PAGE, ELEMENTS, [], [], complete=complete)
+    assert p.prompt_tokens == 812
+    sent = complete.call_args.args[1]
+    assert ", " not in sent[:40] and '": ' not in sent
+    assert complete.call_args.kwargs["max_tokens"] == 160
+
+
 def test_pick_returns_an_offered_id_or_none():
     s = PlanStep("CLICK", "comments", "", "Click the comments link of the second story.")
     options = [("5", "5 | comments | link | CLICK | nav"), ("16", "16 | 17 comments | link | CLICK | main")]

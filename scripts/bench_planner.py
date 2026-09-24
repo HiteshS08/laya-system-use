@@ -77,7 +77,8 @@ def bench_one(path: Path) -> dict:
     pool = [e for e in elements if step and step.operation in e["operations"]]
     element = resolve(step.target_text, pool)[0] if step else None
     return {"task": record["task"], "valid": True, "ok": bool(first_step_ok(record["task"], step, element, elements)),
-            "ms": result.latency_ms, "chars": result.request_chars, "step": step.__dict__ if step else None}
+            "ms": result.latency_ms, "chars": result.request_chars, "prompt_tokens": result.prompt_tokens,
+            "step": step.__dict__ if step else None}
 
 
 if __name__ == "__main__":
@@ -88,7 +89,9 @@ if __name__ == "__main__":
     for r in rows:
         print(f"{r['task']:24} valid={r['valid']!s:5} ok={r['ok']!s:5} ms={r['ms']} {r.get('step') or r.get('error')}")
     times = [r["ms"] for r in rows if r["ms"] is not None]
+    prompt_tokens = [r["prompt_tokens"] for r in rows if r.get("prompt_tokens")]
     print(f"[{label}] n={len(rows)} valid={sum(r['valid'] for r in rows)} first_step_ok={sum(r['ok'] for r in rows)} "
           f"median_ms={statistics.median(times) if times else None} "
-          f"p90_ms={sorted(times)[int(0.9 * (len(times) - 1))] if times else None}")
+          f"p90_ms={sorted(times)[int(0.9 * (len(times) - 1))] if times else None} "
+          f"median_prompt_tokens={statistics.median(prompt_tokens) if prompt_tokens else None}")
     Path(f"artifacts/pages/bench_{label}.json").write_text(json.dumps(rows, indent=1))
