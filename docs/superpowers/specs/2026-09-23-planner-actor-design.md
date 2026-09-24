@@ -130,8 +130,8 @@ goal ───► │ status continue|done|blocked, evidence, steps[1..3]       
 - `GOTO` is allowed only for URLs produced by the search-shortcut registry (5.7); anything else is rejected.
 - Runs: at start, on URL change, when its step queue is empty, and after a failed step. Steps from one call
   are consumed in order while the page stays on the same URL.
-- `done` without verbatim evidence is treated as `continue` and logged. `verifier.py` is removed from the loop
-  (module kept for comparison runs behind `VERIFIER=1`).
+- `done` without verbatim evidence is rejected as an invalid plan (one retry, then `planner_fallback`).
+  `verifier.py` is not used by the planner backend; it stays only on the `laya` backend for comparison runs.
 - Invalid JSON after one retry: `planner_fallback` (actor-only on the raw goal for this page), logged and
   counted.
 - Model: `TEXT_MODEL` (Qwen3-4B-Instruct-2507-4bit default). `max_tokens` 200, temperature 0. For Qwen3
@@ -156,8 +156,9 @@ goal ───► │ status continue|done|blocked, evidence, steps[1..3]       
 ### 5.5 Router — `jev_ultrafast/router.py`
 - Accept the actor's pick when target confidence ≥ τ (per actor). Otherwise ask the planner a single
   `choice` prompt over the actor's top 5 (labels with context) plus "none of these"; "none" triggers a re-plan.
-- τ fitted on replayed live decisions from the baseline (hand-labelled correct element) and Mind2Web dev in
-  step mode; never on test. Default before fitting: 0.5.
+- τ fitted on Mind2Web dev in step mode (the lowest confidence at which accepted picks are ≥ 90% accurate); never
+  on test. The baseline's live decisions used the old request shape, so they cannot calibrate the new one.
+  Default before fitting: 0.5.
 
 ### 5.6 StepMemory and loop guard — `jev_ultrafast/memory.py`
 - Records `(url without fragment, operation, normalised label, value)` and outcome
@@ -249,8 +250,9 @@ Adopt by live success within the speed budget; ties go to the faster one.
 
 ## 11. Constraints carried over
 No Jev outputs as labels (TypeSafe terms 2.3(b)); Mind2Web test evaluation-only; `uv` only; ruff line length
-120; commits via `scripts/commit.sh`; training on Kaggle (Kev T4 fallback noted). New dependency in Phase C:
-`kev` (Apache-2.0); its Qwen3.5 base licence is recorded in `NOTICE.md` before weights are pulled.
+120; commits via `scripts/commit.sh`; training on Kaggle (Kev T4 fallback noted). No new dependency: Kev runs from
+its own checkout behind its local server; its licence and its Qwen3.5 base licence are recorded in `NOTICE.md`
+before weights are pulled.
 
 ## 12. Gates
 1. Phase A+B built → planner model benchmark and replay regression → live suite run → report (Gate A+B).
