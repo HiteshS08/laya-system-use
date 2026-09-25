@@ -5,6 +5,7 @@ Read-only public sites only. Usage: uv run --env-file .env python scripts/live_e
 """
 
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -25,7 +26,8 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                          "via_url_regex": task.via_url_regex, "min_scroll_y": task.min_scroll_y,
                          "flight_date": task.flight_date, "flight_origin_regex": task.flight_origin_regex,
                          "flight_destination_regex": task.flight_destination_regex},
-              "route": "actor_only", "status": "error", "error": None,
+              "backend": os.environ.get("POLICY_BACKEND", ""), "planner_calls": [],
+              "status": "error", "error": None,
               "seconds": None, "verdicts": [], "steps": [], "decisions": [], "success": False}
     try:
         with Agent(task.url, task.goal) as agent:
@@ -60,6 +62,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                          "url_before": (record.get("initial_url", task.url) if i == 0
                                         else state["history"][i - 1]["url"]),
                          "url_after": h.get("url"),
+                         "route": h.get("route"), "instruction": h.get("instruction"),
                          "correct": None, "failure_tag": None}
                         for i, h in enumerate(state["history"])
                     ],
@@ -67,8 +70,11 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                                 "choice": d.get("choice"), "operation": d.get("operation"),
                                 "target": d.get("target"), "confidence": d.get("confidence"),
                                 "target_confidence": d.get("target_confidence"),
-                                "latency_ms": d.get("latency_ms"), "usage": d.get("usage")}
+                                "latency_ms": d.get("latency_ms"), "usage": d.get("usage"),
+                                "route": d.get("route"), "instruction": d.get("instruction"),
+                                "value": d.get("value"), "tool": d.get("tool"), "actor_ms": d.get("actor_ms")}
                                for d in state["decisions"]],
+                    planner_calls=list(agent.pilot.plans) if getattr(agent, 'pilot', None) else [],
                 )
     except Exception as exc:  # noqa: BLE001 - a live run must always leave its record behind
         error = f"{type(exc).__name__}: {exc}"
