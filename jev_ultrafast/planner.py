@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from .policy import candidates_from
 from .resolver import normalize
 from .shortlister import rank_candidates
-from .textmodel import complete_json
+from .textmodel import DISABLE_THINKING, complete_json
 from .tools import is_allowed_goto, search_template
 
 log = logging.getLogger("planner")
@@ -29,8 +29,6 @@ RECENT = 5
 # lines are far shorter), it only guards the adversarial case; the highest-ranked element is always kept.
 ELEMENTS_CHARS_BUDGET = 1600
 LITERAL_NON_VALUES = frozenset({"false", "true", "null", "none"})
-# Qwen3 hybrid models think before answering unless told not to; thinking costs seconds per call.
-DISABLE_THINKING = {"chat_template_kwargs": {"enable_thinking": False}}
 
 PLANNER_SYSTEM = """Plan next browser actions for the goal. Message JSON: url, title, outline, visible_text,
 elements (id|label|role|ops|landmark>section|row|value|offscreen), completed_steps, failed_attempts,
