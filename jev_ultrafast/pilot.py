@@ -4,16 +4,18 @@ import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
+from urllib.parse import quote_plus
 
 from . import policy
 from .formatter import history_strings
 from .memory import StepMemory
 from .model import action_space
-from .planner import Plan, PlanStep, pick, plan
+from .planner import Plan, PlanStep, pick, plan, search_query
 from .pruning import prune_actions
 from .resolver import normalize, resolve
 from .router import Routed, route
 from .textmodel import choose_option
+from .tools import search_template
 
 log = logging.getLogger("pilot")
 STALL_ACTIONS = 4
@@ -23,11 +25,13 @@ TOOL_OPERATIONS = ("SCROLL_TO_TEXT", "GOTO")
 
 class Pilot:
     def __init__(self, goal: str, *, plan_fn: Callable = plan, pick_fn: Callable = pick,
-                 predict: Callable = policy.laya_predict, fallback: Callable = policy.decide) -> None:
+                 predict: Callable = policy.laya_predict, fallback: Callable = policy.decide,
+                 search_query_fn: Callable = search_query) -> None:
         self.goal = goal
         self.memory = StepMemory()
         self.plans: list[dict] = []
         self._plan, self._pick, self._predict, self._fallback = plan_fn, pick_fn, predict, fallback
+        self._search_query = search_query_fn
         self._queue: tuple[PlanStep, ...] = ()
         self._plan_url: str | None = None
         self._planned_at = 0  # attempts known when the current queue was planned
@@ -36,6 +40,7 @@ class Pilot:
         self._pending: tuple[int, PlanStep] | None = None  # (history index, step) of the last decision
         self._unroutable: dict[str, list[str]] = {}
         self._planner_failed: set[str] = set()  # urls where the planner raised; skip straight to fallback there
+        self._searched = False  # whether the search fallback has already issued a GOTO in this run
 
     def decide(self, page: Mapping, history: Sequence[Mapping]) -> dict:
         started = time.perf_counter()
@@ -60,7 +65,7 @@ class Pilot:
                 return decision
             self._note_unroutable(page["url"], step)
             self._queue = ()
-        return self._fall_back(page, history)
+        return self._fall_back(page, history, started)
 
     def _requeue_unexecuted(self, history_len: int) -> None:
         # The previous decision was never executed (no history entry appended for it): put it back.
@@ -70,7 +75,8 @@ class Pilot:
             self._pending = None
 
     def _note_unroutable(self, url: str, step: PlanStep) -> None:
-        note = f"{step.operation} {step.target_text} (no matching element)"
+        reason = "already tried" if step.operation in TOOL_OPERATIONS else "no matching element"
+        note = f"{step.operation} {step.target_text} ({reason})"
         notes = self._unroutable.setdefault(url, [])
         if note not in notes:
             notes.append(note)
@@ -118,6 +124,8 @@ class Pilot:
     def _step_decision(self, step: PlanStep, page: Mapping, elements: Sequence[Mapping], targets: Mapping,
                        history: Sequence[Mapping], started: float) -> dict | None:
         if step.operation in TOOL_OPERATIONS:
+            if (step.operation, normalize(step.target_text)) in self.memory.excluded(page["url"]):
+                return None
             tool = {"operation": step.operation, "arg": step.target_text}
             return self._decision("TOOL", step, Routed(None, "planner", 1.0), started, tool=tool)
         usable = self._usable(page, elements, step.operation)
@@ -156,8 +164,25 @@ class Pilot:
         step = PlanStep(kind, "", "", "")
         return {**self._decision(kind, step, Routed(None, "planner", 1.0), started), "evidence": evidence}
 
-    def _fall_back(self, page: Mapping, history: Sequence[Mapping]) -> dict:
+    def _fall_back(self, page: Mapping, history: Sequence[Mapping], started: float) -> dict:
+        if not self._searched and page["url"] in self._planner_failed:
+            search_decision = self._search_fall_back(page, started)
+            if search_decision is not None:
+                return search_decision
         decision = self._fallback(page, self.goal, history)
         self._pending = None
         return {**decision, "route": "planner_fallback", "instruction": None, "value": None, "tool": None,
                 "evidence": ""}
+
+    def _search_fall_back(self, page: Mapping, started: float) -> dict | None:
+        template = search_template(page["url"])
+        if template is None:
+            return None
+        query = self._search_query(self.goal)
+        if not query:
+            return None
+        self._searched = True
+        url = template.replace("{q}", quote_plus(query))
+        step = PlanStep("GOTO", url, "", f'Search the site for "{query}".')
+        tool = {"operation": "GOTO", "arg": url}
+        return self._decision("TOOL", step, Routed(None, "search_fallback", 1.0), started, tool=tool)

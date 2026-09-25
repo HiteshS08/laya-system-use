@@ -8,6 +8,9 @@ from urllib.parse import urldefrag
 from .resolver import normalize
 
 REPEAT_LIMIT = 2
+# Roles whose CLICK is typically a focus click (e.g. opening a search box) rather than a real navigation:
+# it does not change the page by itself, so a lack of change there is not a failure.
+EDITABLE_ROLES = frozenset({"textbox", "searchbox", "combobox", "spinbutton"})
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,8 @@ class Attempt:
     display: str
     value: str
     outcome: str  # url_changed | page_changed | no_change
+    role: str = ""
+    tool_ok: bool | None = None
 
 
 def _outcome(entry: Mapping) -> str:
@@ -31,12 +36,18 @@ def _attempt(entry: Mapping) -> Attempt:
     url = urldefrag(entry.get("url_before") or entry.get("url") or "")[0]
     operation = entry.get("operation") or str(entry.get("kind", "")).upper()
     label = str(entry.get("action") or "")
-    return Attempt(url, operation, normalize(label), label, entry.get("text") or "", _outcome(entry))
+    return Attempt(url, operation, normalize(label), label, entry.get("text") or "", _outcome(entry),
+                   str(entry.get("role") or ""), entry.get("tool_ok"))
 
 
 def _is_failure(attempt: Attempt) -> bool:
-    # Typing rarely changes the page by itself; its effect is inside the field.
-    return attempt.outcome == "no_change" and attempt.operation != "TYPE_TEXT"
+    # A tool's success is reported directly; trust it over the page-change heuristic below.
+    if attempt.tool_ok is not None:
+        return attempt.tool_ok is False
+    # Typing rarely changes the page by itself, and a focus click on an editable field (opening a search
+    # box) doesn't either; both effects are inside the field, not on the page.
+    return (attempt.outcome == "no_change" and attempt.operation != "TYPE_TEXT"
+            and not (attempt.operation == "CLICK" and attempt.role in EDITABLE_ROLES))
 
 
 class StepMemory:

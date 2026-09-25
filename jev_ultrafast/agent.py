@@ -137,6 +137,7 @@ class Agent:
                     "step": len(state["history"]) + 1,
                     "action": action["label"],
                     "kind": action["kind"],
+                    "role": action.get("role"),
                     "choice": selected,
                     "probability": decision["probabilities"][selected],
                     "confidence": decision["confidence"],
@@ -197,7 +198,7 @@ class Agent:
             "step": len(state["history"]) + 1, "action": tool["arg"], "kind": "tool", "choice": "TOOL",
             "probability": 1.0, "confidence": decision["confidence"], "latency_ms": decision["latency_ms"],
             "text": None, "text_helper": None, "text_latency_ms": 0, "operation": tool["operation"],
-            "target": None, "page_changed": False, "url": page["url"], "url_before": page["url"],
+            "target": None, "tool_ok": ran, "page_changed": False, "url": page["url"], "url_before": page["url"],
             "route": decision.get("route"), "instruction": decision.get("instruction"),
             "usage": {}, "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
         })

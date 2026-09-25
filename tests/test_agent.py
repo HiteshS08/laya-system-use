@@ -377,6 +377,7 @@ def test_tool_decision_runs_the_tool_and_is_recorded(runner, monkeypatch):
     run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links")
     entry = runner.state["history"][-1]
     assert (entry["kind"], entry["operation"], entry["action"]) == ("tool", "SCROLL_TO_TEXT", "External links")
+    assert entry["tool_ok"] is True
     assert runner.state["status"] == "ready"
 
 
@@ -386,7 +387,15 @@ def test_rejected_tool_is_recorded_as_a_step_without_effect(runner, monkeypatch)
                                 "tool": {"operation": "GOTO", "arg": "https://evil.test/"},
                                 "probabilities": {"TOOL": 1.0}}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
-    assert runner.state["history"][-1]["page_changed"] is False
+    entry = runner.state["history"][-1]
+    assert entry["page_changed"] is False
+    assert entry["tool_ok"] is False
+
+
+def test_element_history_entry_records_the_role(runner):
+    runner.state["decision"] = decision("e3")  # e3 is the "Go" button, role "button"
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["history"][-1]["role"] == "button"
 
 
 @pytest.mark.parametrize("value", [False, None, "", "   ", "false", "True", "null", "None", "x" * 2001])

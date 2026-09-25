@@ -52,6 +52,13 @@ def test_unsure_actor_hands_top_options_to_the_planner(monkeypatch):
     assert [i for i, _ in options] == ["1", "3", "2"] and options[0][1].startswith("1 | comments")
 
 
+def test_empty_target_text_routes_to_the_sole_field_without_a_model_call():
+    field = el(4, "Search", ("TYPE_TEXT",))
+    r = route(PlanStep("TYPE_TEXT", "", "Ada Lovelace", "Type Ada Lovelace into Search."), [field], [], "g",
+              predict=never, pick=never)
+    assert (r.index, r.confidence) == ("4", 1.0)
+
+
 def test_planner_rejecting_all_options_gives_no_index(monkeypatch):
     monkeypatch.setenv("ACTOR_TAU", "0.9")
     s = PlanStep("CLICK", "comments of a story", "", "Click the comments link of a story.")

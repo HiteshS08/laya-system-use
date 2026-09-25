@@ -3,9 +3,14 @@ from jev_ultrafast.memory import StepMemory
 P = "https://en.wikipedia.org/wiki/Main_Page"
 
 
-def entry(label, op="CLICK", before=P, after=P, changed=True, text=None):
-    return {"operation": op, "kind": "click", "action": label, "text": text,
-            "url_before": before, "url": after, "page_changed": changed}
+def entry(label, op="CLICK", before=P, after=P, changed=True, text=None, role=None, tool_ok=None):
+    e = {"operation": op, "kind": "tool" if tool_ok is not None else "click", "action": label, "text": text,
+         "url_before": before, "url": after, "page_changed": changed}
+    if role is not None:
+        e["role"] = role
+    if tool_ok is not None:
+        e["tool_ok"] = tool_ok
+    return e
 
 
 def test_sync_ingests_only_new_entries_and_classifies_outcomes():
@@ -55,3 +60,36 @@ def test_missing_url_before_falls_back_to_url():
     m = StepMemory()
     m.sync([{"operation": "CLICK", "action": "Go", "url": P, "page_changed": False}])
     assert m.attempts[0].url == P and m.attempts[0].outcome == "no_change"
+
+
+def test_focus_click_on_an_editable_role_is_not_a_failure():
+    m = StepMemory()
+    m.sync([entry("Search Wikipedia", role="searchbox", changed=False)])
+    assert m.excluded(P) == frozenset() and not m.last_failed()
+
+
+def test_click_on_a_link_with_no_change_is_still_excluded():
+    m = StepMemory()
+    m.sync([entry("Read", role="link", changed=False)])
+    assert m.excluded(P) == frozenset({("CLICK", "read")})
+
+
+def test_tool_attempt_that_found_the_text_is_not_a_failure():
+    m = StepMemory()
+    m.sync([entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
+    assert m.excluded(P) == frozenset() and not m.last_failed()
+
+
+def test_tool_attempt_with_no_effect_is_excluded():
+    m = StepMemory()
+    m.sync([entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=False)])
+    assert m.excluded(P) == frozenset({("SCROLL_TO_TEXT", "external links")})
+    assert m.failed(P) == ["SCROLL_TO_TEXT External links (no effect)"]
+
+
+def test_tool_attempt_repeated_twice_is_excluded_even_when_it_succeeded():
+    m = StepMemory()
+    m.sync([entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True),
+            entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
+    assert ("SCROLL_TO_TEXT", "external links") in m.excluded(P)
+    assert "SCROLL_TO_TEXT External links (repeated)" in m.failed(P)

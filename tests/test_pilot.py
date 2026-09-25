@@ -1,5 +1,6 @@
 from unittest.mock import Mock
 
+from jev_ultrafast import tools
 from jev_ultrafast.pilot import Pilot
 from jev_ultrafast.planner import Plan, PlanStep
 
@@ -26,9 +27,14 @@ CLICK_GO = PlanStep("CLICK", "Go", "", "Click the Go button.")
 TYPE_ADA = PlanStep("TYPE_TEXT", "Search", "Ada Lovelace", 'Type "Ada Lovelace" into Search.')
 
 
-def done_entry(label, op="CLICK", before=URL, after=URL, changed=True, text=None):
-    return {"operation": op, "kind": "click", "action": label, "text": text,
-            "url_before": before, "url": after, "page_changed": changed}
+def done_entry(label, op="CLICK", before=URL, after=URL, changed=True, text=None, role=None, tool_ok=None):
+    e = {"operation": op, "kind": "tool" if tool_ok is not None else "click", "action": label, "text": text,
+         "url_before": before, "url": after, "page_changed": changed}
+    if role is not None:
+        e["role"] = role
+    if tool_ok is not None:
+        e["tool_ok"] = tool_ok
+    return e
 
 
 def pilot(plans, **kw):
@@ -36,6 +42,7 @@ def pilot(plans, **kw):
     kw.setdefault("predict", Mock(side_effect=AssertionError("actor not expected")))
     kw.setdefault("pick_fn", Mock(side_effect=AssertionError("pick not expected")))
     kw.setdefault("fallback", Mock(side_effect=AssertionError("fallback not expected")))
+    kw.setdefault("search_query_fn", Mock(side_effect=AssertionError("search must not be called")))
     return Pilot("Find Ada Lovelace", plan_fn=plan_fn, **kw), plan_fn
 
 
@@ -183,3 +190,57 @@ def test_unroutable_notes_are_not_duplicated():
     assert plan_fn.call_count == 3
     assert plan_fn.call_args.args[4].count("SELECT Country (no matching element)") == 1
     assert d["choice"] == "e3"
+
+
+def test_failed_tool_step_is_excluded_and_replanned():
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    history = [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=False)]
+    p, plan_fn = pilot([cont(scroll), cont(CLICK_GO)])
+    d = p.decide(page(), history)
+    assert plan_fn.call_count == 2
+    assert "SCROLL_TO_TEXT External links (no effect)" in plan_fn.call_args_list[0].args[4]
+    assert "SCROLL_TO_TEXT External links (already tried)" in plan_fn.call_args_list[1].args[4]
+    assert d["choice"] == "e3"
+
+
+def test_focus_click_then_queued_type_step_needs_no_replan():
+    click_search = PlanStep("CLICK", "Search", "", "Click Search.")
+    type_search = PlanStep("TYPE_TEXT", "Search", "Ada Lovelace", 'Type "Ada Lovelace" into Search.')
+    p, plan_fn = pilot([cont(click_search, type_search)])
+    d1 = p.decide(page(), [])
+    assert d1["choice"] == "e2"
+    history = [done_entry("Open Search", op="CLICK", role="searchbox", changed=False)]
+    d2 = p.decide(page(), history)
+    assert (d2["choice"], d2["value"]) == ("e1", "Ada Lovelace")
+    assert plan_fn.call_count == 1
+
+
+def test_planner_failure_on_a_search_site_falls_back_to_a_search_goto_once():
+    search_fn = Mock(return_value="Ada Lovelace")
+    fallback = Mock(return_value={"choice": "e3", "operation": "CLICK", "probabilities": {"e3": 0.7}})
+    p, plan_fn = pilot([ValueError("no valid plan")], fallback=fallback, search_query_fn=search_fn)
+    wiki = page(url="https://en.wikipedia.org/wiki/Main_Page")
+    d1 = p.decide(wiki, [])
+    assert d1["choice"] == "TOOL" and d1["route"] == "search_fallback"
+    assert tools.is_allowed_goto(d1["tool"]["arg"])
+    search_fn.assert_called_once_with("Find Ada Lovelace")
+    d2 = p.decide(wiki, [])
+    assert d2["route"] == "planner_fallback" and d2["choice"] == "e3"
+    search_fn.assert_called_once()  # a second planner failure does not search again
+    assert plan_fn.call_count == 1
+
+
+def test_search_fallback_with_no_query_falls_through_to_the_actor_only_fallback():
+    search_fn = Mock(return_value=None)
+    fallback = Mock(return_value={"choice": "e3", "operation": "CLICK", "probabilities": {"e3": 0.7}})
+    p, _ = pilot([ValueError("no valid plan")], fallback=fallback, search_query_fn=search_fn)
+    d = p.decide(page(url="https://en.wikipedia.org/wiki/Main_Page"), [])
+    search_fn.assert_called_once_with("Find Ada Lovelace")
+    assert d["route"] == "planner_fallback" and d["choice"] == "e3"
+
+
+def test_planner_failure_without_a_search_template_uses_the_actor_only_fallback():
+    fallback = Mock(return_value={"choice": "e3", "operation": "CLICK", "probabilities": {"e3": 0.7}})
+    p, plan_fn = pilot([ValueError("no valid plan")], fallback=fallback)
+    d = p.decide(page(), [])  # example.test has no registered search template
+    assert d["route"] == "planner_fallback" and d["choice"] == "e3"

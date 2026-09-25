@@ -46,6 +46,25 @@ def test_parse_valid_continue_plan():
                                                             "Click the Mary Mallon link in today's featured article."),)
 
 
+def test_type_text_step_with_the_value_in_target_text_is_repaired():
+    raw = {"operation": "TYPE_TEXT", "target_text": "Ada Lovelace", "value": "",
+           "instruction": "Type Ada Lovelace into Search."}
+    p = planner.parse_plan({"status": "continue", "evidence": "", "steps": [raw]}, PAGE)
+    assert p.steps == (PlanStep("TYPE_TEXT", "", "Ada Lovelace", "Type Ada Lovelace into Search."),)
+
+
+def test_swapped_literal_value_still_raises():
+    raw = {"operation": "TYPE_TEXT", "target_text": "false", "value": "",
+           "instruction": "Type false into Search."}
+    with pytest.raises(ValueError):
+        planner.parse_plan({"status": "continue", "evidence": "", "steps": [raw]}, PAGE)
+
+
+def test_click_with_empty_target_text_still_raises():
+    with pytest.raises(ValueError):
+        planner.parse_plan({"status": "continue", "evidence": "", "steps": [step(target_text="")]}, PAGE)
+
+
 def test_done_needs_a_quote_the_page_shows_regardless_of_case_accents_and_spacing():
     ok = planner.parse_plan({"status": "done", "evidence": "mary  MALLON was an irish-born cook", "steps": []}, PAGE)
     assert ok.status == "done"
@@ -60,7 +79,6 @@ def test_done_needs_a_quote_the_page_shows_regardless_of_case_accents_and_spacin
     {"status": "continue", "evidence": "", "steps": []},
     {"status": "continue", "evidence": "", "steps": [step(operation="HOVER")]},
     {"status": "continue", "evidence": "", "steps": [step(target_text="")]},
-    {"status": "continue", "evidence": "", "steps": [step(operation="TYPE_TEXT", value="")]},
     {"status": "continue", "evidence": "", "steps": [step(operation="TYPE_TEXT", value="false")]},
     {"status": "continue", "evidence": "", "steps": [step(operation="GOTO", target_text="https://evil.test/")]},
     {"status": "continue", "evidence": "", "steps": [step(instruction=7)]},
@@ -123,6 +141,13 @@ def test_plan_records_prompt_tokens_and_sends_compact_json():
     sent = complete.call_args.args[1]
     assert ", " not in sent[:40] and '": ' not in sent
     assert complete.call_args.kwargs["max_tokens"] == 256
+
+
+def test_search_query_returns_the_stripped_query_or_none():
+    assert planner.search_query("g", complete=Mock(return_value=({"query": "Ada Lovelace"}, {}))) == "Ada Lovelace"
+    assert planner.search_query("g", complete=Mock(return_value=({"query": None}, {}))) is None
+    assert planner.search_query("g", complete=Mock(return_value=({"query": ""}, {}))) is None
+    assert planner.search_query("g", complete=Mock(side_effect=ValueError("no server"))) is None
 
 
 def test_pick_returns_an_offered_id_or_none():
