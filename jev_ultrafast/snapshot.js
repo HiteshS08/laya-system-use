@@ -130,6 +130,17 @@
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
   const outline=[...document.querySelectorAll('h1,h2,h3')].map(h=>squash(h.textContent,80))
     .filter(Boolean).join(' | ').slice(0,1000);
-  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,outline,
+  // Visible headings with viewport state: completion checks ("the section heading is in view") read these.
+  const headings=[];
+  for (const h of document.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
+    if (headings.length>=200) break;
+    const t=squash(h.textContent,80);
+    if (!t || !visible(h)) continue;
+    const r=h.getBoundingClientRect();
+    headings.push({text:t,level:Number(h.tagName[1]),id:h.id||'',in_viewport:r.bottom>0 && r.top<innerHeight});
+  }
+  const opensearch=document.querySelector('link[rel="search"][type="application/opensearchdescription+xml"]')
+    ?.href||'';
+  return {url:location.href,title:document.title,w:innerWidth,h:innerHeight,text,outline,headings,opensearch,
     scroll:{y:scrollY,height},actions,marker,page_key,guards,omitted_actions};
 })()
