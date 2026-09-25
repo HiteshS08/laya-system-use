@@ -9,6 +9,7 @@ from .resolver import normalize
 
 _TITLE_SEPARATORS = re.compile(r"\s+[-–—|·]\s+")
 _PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*$")
+_BRACKETED = re.compile(r"\s*\[[^\]]*\]\s*$")  # "References[edit]" on skins that put the edit link inside
 
 
 def title_subject(title: str) -> str:
@@ -40,7 +41,7 @@ def fragment_names(url: str, section: str) -> bool:
 
 def heading_in_view(page: Mapping, text: str) -> bool:
     want = normalize(text)
-    return bool(want) and any(h.get("in_viewport") and normalize(h.get("text", "")) == want
+    return bool(want) and any(h.get("in_viewport") and normalize(_BRACKETED.sub("", h.get("text", ""))) == want
                               for h in page.get("headings", []))
 
 

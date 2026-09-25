@@ -53,3 +53,8 @@ def test_satisfied_by_kind():
 def test_pages_without_headings_still_work():
     assert not heading_in_view({"url": URL, "title": "", "text": ""}, "References")
     assert is_about({"url": URL, "title": "Alan Turing - Wikipedia", "text": ""}, "Alan Turing")
+
+
+def test_heading_with_an_inline_edit_link_still_matches():
+    edit = page(headings=[{"text": "References[edit]", "level": 2, "id": "References", "in_viewport": True}])
+    assert heading_in_view(edit, "References")
