@@ -28,7 +28,7 @@ from .tactics import Progress, Step, matching_option, next_step
 log = logging.getLogger("controller")
 MAX_ACTIONS_PER_SUBGOAL = 4
 MAX_MISSES_PER_SUBGOAL = 2
-TOOL_OPERATIONS = ("SCROLL_TO_TEXT", "GOTO", "SUBMIT")
+TOOL_OPERATIONS = ("SCROLL_TO_TEXT", "GOTO", "SUBMIT", "FRAGMENT")
 PAGE_KINDS = ("FIND", "JUMP", "SCROLL")  # kinds whose completion the page itself shows
 
 

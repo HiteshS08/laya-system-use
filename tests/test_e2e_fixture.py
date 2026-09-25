@@ -72,3 +72,8 @@ def test_fill_with_suggestion_then_submit(monkeypatch, tmp_path):
     state = run(monkeypatch, tmp_path, "form.html",
                 "FILL Where to? = London\nCLICK Search\nDONE_WHEN Results for London")
     assert state["status"] == "done" and state["page"]["url"].endswith("done.html")
+
+
+def test_jump_to_a_heading_without_a_contents_link(monkeypatch, tmp_path):
+    state = run(monkeypatch, tmp_path, "ada.html", "JUMP Legacy")
+    assert state["status"] == "done" and state["page"]["url"].endswith("#Legacy")

@@ -85,3 +85,9 @@ def test_evaluate_can_await_a_promise():
     b.call = Mock(return_value={"result": {"value": "xml"}})
     assert b.evaluate("fetch()", await_promise=True) == "xml"
     assert b.call.call_args.kwargs["awaitPromise"] is True
+
+
+def test_fragment_sets_the_hash_as_json_data():
+    browser = Mock(evaluate=Mock(return_value="#Refs"))
+    assert tools.run_tool(browser, "FRAGMENT", 'Refs"; alert(1); "') is True
+    assert browser.evaluate.call_args.args[0] == 'location.hash = "Refs\\"; alert(1); \\""'

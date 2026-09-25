@@ -111,3 +111,10 @@ def test_find_clicks_a_search_button_when_enter_did_nothing():
     elements = els(("Search", "searchbox", ["TYPE_TEXT"]), ("Search", "button", ["CLICK"]))
     step = next_step(Subgoal("FIND", "Ada"), PAGE, elements, Progress(typed=True, misses=1))
     assert (step.operation, step.index, step.purpose) == ("CLICK", "2", "submit")
+
+
+def test_jump_sets_the_fragment_of_a_matching_heading_when_no_link_exists():
+    page = {**PAGE, "headings": [{"text": "References", "level": 2, "id": "References", "in_viewport": False}]}
+    step = next_step(Subgoal("JUMP", "References"), page, [], Progress())
+    assert (step.operation, step.target_text) == ("FRAGMENT", "References")
+    assert next_step(Subgoal("JUMP", "References"), page, [], Progress(misses=1)).operation == "SCROLL_TO_TEXT"

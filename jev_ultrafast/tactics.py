@@ -16,7 +16,7 @@ OPTION_ROLES = frozenset({"option", "menuitem", "menuitemradio", "gridcell"})
 
 @dataclass(frozen=True)
 class Step:
-    operation: str  # CLICK | TYPE_TEXT | SELECT | SCROLL_TO_TEXT | GOTO | SUBMIT | DO
+    operation: str  # CLICK | TYPE_TEXT | SELECT | SCROLL_TO_TEXT | GOTO | SUBMIT | FRAGMENT | DO
     target_text: str
     value: str
     instruction: str
@@ -96,12 +96,17 @@ def _find(sub: Subgoal, elements: Sequence[Mapping], progress: Progress, templat
     return Step("CLICK", name, "", instruction("RESULT", name), purpose="result")
 
 
-def _jump(sub: Subgoal, page: Mapping, elements: Sequence[Mapping]) -> Step:
+def _jump(sub: Subgoal, page: Mapping, elements: Sequence[Mapping], progress: Progress) -> Step:
     here = urldefrag(page.get("url", ""))[0]
     link = next((e for e in elements if _can(e, "CLICK") and e.get("href") and
                  urldefrag(e["href"])[0] == here and fragment_names(e["href"], sub.target)), None)
     if link is not None:
         return Step("CLICK", link.get("label", sub.target), "", instruction("JUMP", sub.target), index=link["index"])
+    want = normalize(sub.target)
+    heading = next((h for h in page.get("headings", []) if h.get("id") and normalize(h.get("text", "")) == want), None)
+    if heading is not None and not progress.misses:
+        # No visible contents link (e.g. a collapsed table of contents): go to the observed heading's own anchor.
+        return Step("FRAGMENT", heading["id"], "", instruction("JUMP", sub.target))
     return Step("SCROLL_TO_TEXT", sub.target, "", instruction("SCROLL", sub.target))
 
 
@@ -137,7 +142,7 @@ def next_step(subgoal: Subgoal, page: Mapping, elements: Sequence[Mapping], prog
     if kind == "FIND":
         return _find(subgoal, elements, progress, template)
     if kind == "JUMP":
-        return _jump(subgoal, page, elements)
+        return _jump(subgoal, page, elements, progress)
     if kind == "FILL":
         return _fill(subgoal, elements, progress)
     if kind == "SELECT":

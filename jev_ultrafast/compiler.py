@@ -17,6 +17,7 @@ MAX_TOKENS = 96
 COMPILER_SYSTEM = """Rewrite a browser task as a short program, one step per line. Use only these steps:
 FIND <name>               reach the page about a named thing (article, repository, product, person)
 OPEN <description>        click the link, tab or item described; add @N for the Nth of a repeated item
+                          (the top or first one is @1)
 JUMP <section>            go to a section of the current page
 SCROLL <text>             scroll until the text is visible
 FILL <field> = <value>    type a value into a form field

@@ -1,5 +1,6 @@
-"""Non-element actions: scroll to text, go to a site-search URL rendered by code, press Enter to submit."""
+"""Non-element actions: scroll to text, go to a rendered site-search URL, press Enter, go to an observed anchor."""
 
+import json
 import re
 from collections.abc import Sequence
 from urllib.parse import urlsplit
@@ -33,5 +34,9 @@ def run_tool(browser, operation: str, arg: str, *, templates: Sequence[str] = ()
         return browser.scroll_to_text(arg)
     if operation == "SUBMIT":
         browser.press_enter()
+        return True
+    if operation == "FRAGMENT":
+        # The id comes from the observed page and is passed as a JSON string literal, never as code.
+        browser.evaluate(f"location.hash = {json.dumps(arg)}")
         return True
     raise ValueError(f"Unknown tool operation {operation!r}")
