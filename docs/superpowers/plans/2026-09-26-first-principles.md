@@ -1206,4 +1206,31 @@ budget.
 
 ## Deviations
 
-(Recorded during implementation.)
+Recorded during implementation (commits named in the overnight report).
+
+1. **Task 1:** the plan's test text was copied verbatim except that the fence-stripping regex also drops a fence's
+   language tag (```` ```text ````), found while writing the parser. No behaviour change against the tests.
+2. **Task 5:** `learn_template` keeps the other query parameters' original encoding instead of re-encoding them
+   with `quote_plus` (the controller test showed `Special:Search` turning into `Special%3ASearch`). The existing
+   `test_tool_decision_runs_the_tool_and_is_recorded` now expects `templates=()` on `run_tool`, and the Agent change
+   planned for Task 8 (`_act_tool` passes templates) landed in Task 5 with its test.
+3. **Task 6:** after a template search (`searched`), FIND clicks the result instead of typing the same query into
+   the results page's search box (retyping would loop). The "only text field on the page" search-box fallback was
+   dropped: typing a name into an arbitrary field (a newsletter box) does harm. `Progress` gained `opened` (custom
+   dropdown opened) so SELECT does not toggle a listbox shut again.
+4. **Task 7 / Checkpoint B:** exclusions are keyed by (document URL, normalized label), not by element index,
+   because indices are renumbered on every observation. FIND clicks a search button when Enter had no effect
+   (`purpose="submit"`). `LAYA_PROGRAM_CACHE=0` disables the program cache (for evaluation runs that must pay
+   for their own compile). A SUBMIT with no page change counts as a miss even though its tool reports success.
+5. **Task 12:** a step whose operation has a single candidate is skipped (serving never asks the model then), so
+   the plan's TYPE example became a CLICK example. The test-split guard matches Mind2Web's own names
+   (`test_task_*`, `test_website_*`, `test_domain_*`, or a `test/` directory) instead of any path containing
+   "test", which also matched pytest's temporary directories. The D3 input path is `data/mind2web/data/train/`,
+   where `fetch_data.py` puts the shards.
+6. **Checkpoint D (added work):** JUMP gained a `FRAGMENT` tool: when no visible contents link names the section
+   but an observed heading with that text has an `id`, the controller sets `location.hash` to that id (passed as a
+   JSON string, never as model output). Reason: Wikipedia's table of contents can be collapsed at the agent's
+   viewport width, and the suite's References tasks check the `#References` fragment, which scrolling never sets.
+   The compiler prompt now says that "top"/"first" is `@1`.
+7. **Checkpoint A:** heading matching ignores a trailing bracketed segment ("References[edit]" on skins that put
+   the edit link inside the heading).

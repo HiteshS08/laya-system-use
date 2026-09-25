@@ -49,8 +49,8 @@ Three things decide success on the 25-task suite, and the design should be judge
 | A10 | DOM candidate pipeline (snapshot.js: whole document, dedupe by href, landmark/section/row context, detour filter) | **Kept, extended** | It is effectively an accessibility-tree view with stable node ids and pre-input hit testing, which is what AgentOccam and Region4Web argue for (compact, semantic observations). Added: a `headings` list (text, level, id, in-viewport) for completion checks, and the page's OpenSearch link. |
 | A11 | K=20 lexical shortlist | **Kept for now, re-queried** | The query is the step instruction plus target phrase, which names the element; recall was 6/6 in the probe. Step-mode recall@K is to be measured offline on Mind2Web dev before any change of K (DEFERRED TO MAC, needs the data). |
 | A12 | Screenshots | **Dropped from the loop** | The actor does not consume pixels; vision models that fit (ShowUI-2B) or ground best (UI-TARS-1.5-7B, 4-bit MLX ~5 GB) cost memory the machine does not have and seconds per step. Kept only as optional recordings. |
-| A13 | Action set: CLICK, TYPE_TEXT, SELECT, SCROLL_TO_TEXT, GOTO (registered templates only), WAIT, SCROLL_* | **Changed** | Added SUBMIT (press Enter in the focused field), the most general way to run a search or a form. GOTO is now allowed only for URLs *rendered by code* from a search template discovered on that host (OpenSearch) or learned from an observed search; the model never emits a URL. WAIT/SCROLL_* stay available only to the goal-mode fallback. |
-| A14 | Step memory with exclusions, repeat limits and a 4-action stall rule | **Simplified** | Memory is per subgoal: elements that produced no effect are excluded for that subgoal; a subgoal gets at most 4 actions and 2 no-effect actions, then the run stops BLOCKED. Stopping early is better than wandering because the final page is what is checked. |
+| A13 | Action set: CLICK, TYPE_TEXT, SELECT, SCROLL_TO_TEXT, GOTO (registered templates only), WAIT, SCROLL_* | **Changed** | Added SUBMIT (press Enter in the focused field), the most general way to run a search or a form, and FRAGMENT (go to an observed heading's own `id` anchor when no contents link is visible). GOTO is now allowed only for URLs *rendered by code* from a search template discovered on that host (OpenSearch) or learned from an observed search; the model never emits a URL. WAIT/SCROLL_* stay available only to the goal-mode fallback. |
+| A14 | Step memory with exclusions, repeat limits and a 4-action stall rule | **Simplified** | Memory is per subgoal: elements that produced no effect are excluded for that subgoal (keyed by page and label, since element numbers change between observations); a subgoal gets at most 4 actions and 2 no-effect actions, then the run stops BLOCKED. Stopping early is better than wandering because the final page is what is checked. |
 | A15 | Hardcoded per-site search registry (Wikipedia, GitHub) | **Changed** | Per-site knowledge is discovered, not written: the OpenSearch description (`<link rel="search">`, a web standard both sites publish) or a template learned the first time a typed search lands on a URL containing the query. Stored in a small cache. |
 | A16 | Workflow memory / replay | **Minimal** | Only deterministic facts are cached: compiled programs by goal text, and search templates by host. A 2026 budget-matched study found that AWM, ASI and ReasoningBank did not beat a vanilla actor given the same token budget (arXiv 2606.15017). AWM's reported gains (+24.6% relative on Mind2Web, +51.1% on WebArena) came from LLM agents, not a typed actor. |
 | A17 | Mind2Web-only training | **Changed** | Mind2Web stays (CC-BY-4.0, train split only). Add (a) step-mode items rendered with the serving templates and (b) self-collected items from exploring public pages with no LLM, where the label comes from the page itself (NNetNav / OS-Genesis / Explorer / SynWeaver all show interaction-first synthesis works). Nothing from Jev, ever. |
@@ -88,7 +88,7 @@ One subgoal per line: `KIND target`, `KIND target = value`, optional `@N` ordina
 | Kind | Meaning | Page predicate (checks.py) |
 |---|---|---|
 | `FIND name` | reach the page about a named thing | title (site suffix and parenthetical stripped) or first h1 equals the name |
-| `OPEN description [@N]` | click the link/tab described (the Nth of a repeated item) | document URL changed since the subgoal started, after a click for it |
+| `OPEN description [@N]` | click the link/tab described (the Nth of a repeated item; "top" is `@1`) | document URL changed since the subgoal started, after a click for it |
 | `JUMP section` | go to a section of this page | URL fragment names the section, or a heading with that text is in the viewport |
 | `SCROLL text` | scroll until the text is visible | a heading with that text is in the viewport, or the scroll tool found it |
 | `FILL field = value` | type a value, then pick the matching suggestion if one appears | typed, and no matching suggestion is left unpicked |
@@ -109,7 +109,7 @@ than 8 subgoals, or over-long fields. `render_program(program) -> str` is its in
 plus four examples from domains *not* in the suite. Output is plain lines, `max_tokens` 96, temperature 0, thinking
 disabled. One retry with the parse error appended; then `fallback_program(goal)` (`DO goal`). The goal is untrusted
 data and the output is only parsed, never executed. Cache: JSON file keyed by the normalized goal in
-`LAYA_CACHE_DIR` (default `~/.cache/laya-browser`). Model: `COMPILER_MODEL`, default `TEXT_MODEL`; the Mac benchmark
+`LAYA_CACHE_DIR` (default `~/.cache/laya-browser`); `LAYA_PROGRAM_CACHE=0` turns the program cache off. Model: `COMPILER_MODEL`, default `TEXT_MODEL`; the Mac benchmark
 (D1) picks between Qwen3-4B-Instruct-2507 and Qwen3-1.7B.
 
 ### 4.3 Checks (`jev_ultrafast/checks.py`)
@@ -127,9 +127,11 @@ names:
 
 - **FIND**: a link whose label resolves exactly to the name → click it. Else, if a search template is known for the
   host and not yet used → GOTO the rendered URL. Else a search field → type the name (opening a collapsed search
-  control first if no field is visible); then SUBMIT; then click the result that names it (resolver, then actor).
+  control first if no field is visible); then SUBMIT (if Enter has no effect, click the search button); then click
+  the result that names it (resolver, then actor).
 - **OPEN**: click the described element; with `@N`, the Nth member of the repeated group that matches the description.
-- **JUMP**: click the same-document link whose fragment names the section (deterministic); else SCROLL_TO_TEXT.
+- **JUMP**: click the same-document link whose fragment names the section (deterministic); else go to the anchor of
+  the observed heading with that text (FRAGMENT, id from the page, passed as data); else SCROLL_TO_TEXT.
 - **SCROLL**: SCROLL_TO_TEXT.
 - **FILL**: type the value into the described field; next, if an option naming the value is visible, click it.
 - **SELECT**: a visible option naming the value → click it; else a native select → SELECT; else click the field to
