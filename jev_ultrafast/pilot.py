@@ -3,14 +3,14 @@
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from urllib.parse import quote_plus
 
 from . import policy
 from .formatter import history_strings
 from .memory import StepMemory, is_failure
 from .model import action_space
-from .planner import Plan, PlanStep, pick, plan, search_query
+from .planner import Plan, PlanStep, pick, plan, search_query, shows_phrase
 from .pruning import prune_actions
 from .resolver import normalize, resolve
 from .router import Routed, route
@@ -36,6 +36,17 @@ def _counts_as_completed(attempt) -> bool:
     return not is_failure(attempt)
 
 
+@dataclass(frozen=True)
+class Pending:
+    """A decision handed to the Agent, kept until its history entry shows what it did."""
+
+    history_index: int
+    step: PlanStep
+    chosen: str | None = None  # element index the decision acts on
+    ranked: tuple[tuple[str, float], ...] = ()  # the actor's ranking behind that choice, best first
+    retry: bool = False
+
+
 class Pilot:
     def __init__(self, goal: str, *, plan_fn: Callable = plan, pick_fn: Callable = pick,
                  predict: Callable = policy.laya_predict, fallback: Callable = policy.decide,
@@ -50,7 +61,10 @@ class Pilot:
         self._planned_at = 0  # attempts known when the current queue was planned
         self._completed: list[str] = []
         self._completed_at: list[int] = []  # len(completed) after each executed action
-        self._pending: tuple[int, PlanStep] | None = None  # (history index, step) of the last decision
+        self._pending: Pending | None = None  # the last decision, until the Agent records it
+        self._retry: Pending | None = None  # a no-effect step whose actor ranking still has an untried candidate
+        self._must_replan = False  # the retry rule is exhausted: the next decision asks the planner
+        self._done_when = ""  # the current plan's completion phrase, checked after every action
         self._unroutable: dict[str, list[str]] = {}
         self._planner_failed: set[str] = set()  # urls where the planner raised; skip straight to fallback there
         self._searched = False  # whether a GOTO decision (planner or search fallback) has issued in this run
@@ -60,9 +74,14 @@ class Pilot:
         started = time.perf_counter()
         self._requeue_unexecuted(len(history))
         self._absorb(history)
+        if self._done_when_met(page):
+            return self._stop("DONE", self._done_when, started, via="done_when")
         if self._stalled():
             return self._stop("BLOCKED", "", started)
         elements, targets, _ = action_space(prune_actions(page["actions"], self.goal))
+        retried = self._retry_decision(page, elements, targets, len(history), started)
+        if retried is not None:
+            return retried
         for _ in range(MAX_PLANS_PER_DECISION):
             if self._needs_plan(page):
                 if page["url"] in self._planner_failed:
@@ -75,17 +94,17 @@ class Pilot:
             step, self._queue = self._queue[0], self._queue[1:]
             decision = self._step_decision(step, page, elements, targets, history, started)
             if decision is not None:
-                self._pending = (len(history), step)
                 return decision
             self._note_unroutable(page["url"], step)
             self._queue = ()
         return self._fall_back(page, history, started)
 
     def _requeue_unexecuted(self, history_len: int) -> None:
-        # The previous decision was never executed (no history entry appended for it): put it back.
-        if self._pending is not None and self._pending[0] == history_len:
-            _, step = self._pending
-            self._queue = (step, *self._queue)
+        # The previous decision was never executed (no history entry appended for it): put it back. An unexecuted
+        # retry needs nothing put back, since self._retry still holds the step it retries.
+        if self._pending is not None and self._pending.history_index == history_len:
+            if not self._pending.retry:
+                self._queue = (self._pending.step, *self._queue)
             self._pending = None
 
     def _note_unroutable(self, url: str, step: PlanStep) -> None:
@@ -98,11 +117,19 @@ class Pilot:
     def _absorb(self, history: Sequence[Mapping]) -> None:
         known = len(self.memory.attempts)
         self.memory.sync(history)
-        if self._pending and self._pending[0] < len(history):
-            index, step = self._pending
-            if _counts_as_completed(self.memory.attempts[index]):
-                self._completed.append(step.instruction)
-            self._pending = None
+        if self._pending and self._pending.history_index < len(history):
+            done, self._pending = self._pending, None
+            attempt = self.memory.attempts[done.history_index]
+            if _counts_as_completed(attempt):
+                self._completed.append(done.step.instruction)
+            if done.retry:
+                self._retry = None
+            if is_failure(attempt):
+                # Retry once on the actor's next candidate; without one, or after the retry, ask the planner.
+                if done.ranked and not done.retry:
+                    self._retry = done
+                else:
+                    self._must_replan = True
         self._completed_at.extend([len(self._completed)] * (len(self.memory.attempts) - known))
 
     def _stalled(self) -> bool:
@@ -111,9 +138,13 @@ class Pilot:
         before = self._completed_at[-STALL_ACTIONS - 1] if len(self._completed_at) > STALL_ACTIONS else 0
         return self._completed_at[-1] == before
 
+    def _done_when_met(self, page: Mapping) -> bool:
+        acted = len(self.memory.attempts) > self._planned_at
+        return bool(self._done_when) and acted and shows_phrase(self._done_when, page)
+
     def _needs_plan(self, page: Mapping) -> bool:
-        new_failure = self.memory.last_failed() and len(self.memory.attempts) > self._planned_at
-        return not self._queue or page["url"] != self._plan_url or new_failure
+        # The only replan triggers: a URL change, an exhausted queue, and an exhausted retry rule.
+        return not self._queue or page["url"] != self._plan_url or self._must_replan
 
     def _replan(self, page: Mapping, elements: Sequence[Mapping]) -> Plan | None:
         failed = [*self.memory.failed(page["url"]), *self._unroutable.get(page["url"], [])]
@@ -126,9 +157,10 @@ class Pilot:
             self._planner_failed.add(page["url"])
             return None
         self.plans.append({"url": page["url"], "status": result.status, "evidence": result.evidence,
-                           "steps": [asdict(s) for s in result.steps], "latency_ms": result.latency_ms,
-                           "request_chars": result.request_chars})
+                           "done_when": result.done_when, "steps": [asdict(s) for s in result.steps],
+                           "latency_ms": result.latency_ms, "request_chars": result.request_chars})
         self._queue, self._plan_url, self._planned_at = result.steps, page["url"], len(self.memory.attempts)
+        self._done_when, self._retry, self._must_replan = result.done_when, None, False
         return result
 
     def _usable(self, page: Mapping, elements: Sequence[Mapping], operation: str) -> list[Mapping]:
@@ -140,6 +172,7 @@ class Pilot:
         if step.operation in TOOL_OPERATIONS:
             if (step.operation, normalize(step.target_text)) in self.memory.excluded(page["url"]):
                 return None
+            self._pending = Pending(len(history), step)
             tool = {"operation": step.operation, "arg": step.target_text}
             return self._decision("TOOL", step, Routed(None, "planner", 1.0), started, tool=tool)
         usable = self._usable(page, elements, step.operation)
@@ -147,6 +180,25 @@ class Pilot:
         routed = route(step, usable, recent, self.goal, predict=self._predict, pick=self._pick)
         if routed.index is None:
             return None
+        self._pending = Pending(len(history), step, routed.index, routed.actor.ranked if routed.actor else ())
+        return self._element_decision(step, routed, elements, targets, started)
+
+    def _retry_decision(self, page: Mapping, elements: Sequence[Mapping], targets: Mapping, history_len: int,
+                        started: float) -> dict | None:
+        failed = self._retry
+        if failed is None:
+            return None
+        operation = failed.step.operation
+        usable = {e["index"] for e in self._usable(page, elements, operation) if operation in e["operations"]}
+        nxt = next(((i, p) for i, p in failed.ranked if i != failed.chosen and i in usable), None)
+        if nxt is None or page["url"] != self._plan_url:
+            self._retry, self._must_replan = None, True
+            return None
+        self._pending = Pending(history_len, failed.step, nxt[0], failed.ranked, retry=True)
+        return self._element_decision(failed.step, Routed(nxt[0], "retry", nxt[1]), elements, targets, started)
+
+    def _element_decision(self, step: PlanStep, routed: Routed, elements: Sequence[Mapping], targets: Mapping,
+                          started: float) -> dict:
         key = routed.index
         if step.operation == "SELECT":
             key = self._select_key(next(e for e in elements if e["index"] == routed.index), step)
@@ -178,9 +230,9 @@ class Pilot:
             "value": step.value or None, "tool": tool, "evidence": "",
         }
 
-    def _stop(self, kind: str, evidence: str, started: float) -> dict:
+    def _stop(self, kind: str, evidence: str, started: float, via: str = "planner") -> dict:
         step = PlanStep(kind, "", "", "")
-        return {**self._decision(kind, step, Routed(None, "planner", 1.0), started), "evidence": evidence}
+        return {**self._decision(kind, step, Routed(None, via, 1.0), started), "evidence": evidence}
 
     def _fall_back(self, page: Mapping, history: Sequence[Mapping], started: float) -> dict:
         if not self._searched and page["url"] in self._planner_failed:

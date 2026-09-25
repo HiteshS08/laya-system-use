@@ -325,3 +325,95 @@ def test_failed_scroll_is_not_a_focus_target():
     p.decide(page(), [])
     p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=False)])
     assert plan_fn.call_args.kwargs["focus"] == ""
+
+
+def test_done_when_phrase_after_an_action_ends_the_run_without_a_planner_call():
+    p, plan_fn = pilot([Plan("continue", "", (TYPE_ADA, CLICK_GO), done_when="Ada Lovelace - Wikipedia")])
+    p.decide(page(), [])
+    typed = [done_entry("Search", op="TYPE_TEXT", changed=True, text="Ada Lovelace")]
+    assert p.decide(page(), typed)["choice"] == "e3"
+    ada = {**page(url=URL + "wiki/Ada_Lovelace", text="Augusta Ada King"), "title": "Ada Lovelace \u2013 Wikipedia"}
+    d = p.decide(ada, [*typed, done_entry("Go", after=URL + "wiki/Ada_Lovelace")])
+    assert (d["choice"], d["evidence"], d["route"]) == ("DONE", "Ada Lovelace - Wikipedia", "done_when")
+    assert plan_fn.call_count == 1
+
+
+def test_done_when_is_only_checked_after_an_action():
+    p, plan_fn = pilot([Plan("continue", "", (TYPE_ADA,), done_when="Search the site")])
+    assert p.decide(page(), [])["choice"] == "e1"
+
+
+def test_queue_exhausted_without_done_when_met_replans():
+    p, plan_fn = pilot([Plan("continue", "", (CLICK_GO,), done_when="Welcome aboard"), cont(TYPE_ADA)])
+    p.decide(page(), [])
+    d = p.decide(page(), [done_entry("Go", changed=True)])
+    assert plan_fn.call_count == 2 and d["choice"] == "e1"
+
+
+def unsure_actor(first="2", second="1"):
+    return Mock(return_value={"answers": {"click_target": {
+        "choice": first, "confidence": 0.6, "probabilities": {first: 0.6, second: 0.4}}}})
+
+
+VAGUE = PlanStep("CLICK", "the button", "", "Click the button that submits.")
+
+
+def test_no_effect_actor_step_is_retried_on_the_next_ranked_candidate_without_replanning():
+    predict = unsure_actor()
+    p, plan_fn = pilot([cont(VAGUE, TYPE_ADA)], predict=predict)
+    assert p.decide(page(), [])["choice"] == "e3"
+    d = p.decide(page(), [done_entry("Go", changed=False)])
+    assert (d["choice"], d["route"], d["confidence"]) == ("e2", "retry", 0.4)
+    assert plan_fn.call_count == 1 and predict.call_count == 1
+    d = p.decide(page(), [done_entry("Go", changed=False), done_entry("Open Search", changed=True)])
+    assert d["choice"] == "e1" and plan_fn.call_count == 1  # the rest of the queue survives a successful retry
+
+
+def test_retry_that_also_has_no_effect_replans():
+    p, plan_fn = pilot([cont(VAGUE, TYPE_ADA), cont(TYPE_ADA)], predict=unsure_actor())
+    p.decide(page(), [])
+    p.decide(page(), [done_entry("Go", changed=False)])
+    d = p.decide(page(), [done_entry("Go", changed=False), done_entry("Open Search", changed=False)])
+    assert plan_fn.call_count == 2 and d["choice"] == "e1"
+    assert {"CLICK Go (no effect)", "CLICK Open Search (no effect)"} <= set(plan_fn.call_args.args[4])
+
+
+def test_retry_skips_a_same_label_sibling_of_the_failed_element():
+    twins = [{"id": "e1", "kind": "click", "label": "Go", "role": "button", "node": 1},
+             {"id": "e2", "kind": "click", "label": "Go", "role": "button", "node": 2},
+             {"id": "e3", "kind": "click", "label": "Send", "role": "button", "node": 3}]
+    pg = {"url": URL, "title": "Example", "text": "Form", "outline": "", "actions": twins}
+    predict = Mock(return_value={"answers": {"click_target": {
+        "choice": "1", "confidence": 0.5, "probabilities": {"1": 0.5, "2": 0.3, "3": 0.2}}}})
+    p, plan_fn = pilot([cont(VAGUE)], predict=predict)
+    assert p.decide(pg, [])["choice"] == "e1"
+    d = p.decide(pg, [done_entry("Go", changed=False)])
+    assert (d["choice"], d["route"]) == ("e3", "retry") and plan_fn.call_count == 1
+
+
+def test_no_effect_actor_step_without_a_usable_next_candidate_replans():
+    twins = [{"id": "e1", "kind": "click", "label": "Go", "role": "button", "node": 1},
+             {"id": "e2", "kind": "click", "label": "Go", "role": "button", "node": 2},
+             {"id": "e3", "kind": "fill", "label": "Search", "role": "searchbox", "node": 3}]
+    pg = {"url": URL, "title": "Example", "text": "Form", "outline": "", "actions": twins}
+    p, plan_fn = pilot([cont(VAGUE), cont(TYPE_ADA)], predict=unsure_actor("1", "2"))
+    assert p.decide(pg, [])["choice"] == "e1"
+    d = p.decide(pg, [done_entry("Go", changed=False)])  # the other "Go" is excluded along with its twin
+    assert plan_fn.call_count == 2 and (d["choice"], d["route"]) == ("e3", "resolver")
+
+
+def test_unexecuted_retry_is_offered_again_without_replanning():
+    p, plan_fn = pilot([cont(VAGUE)], predict=unsure_actor())
+    p.decide(page(), [])
+    failed = [done_entry("Go", changed=False)]
+    assert p.decide(page(), failed)["route"] == "retry"
+    assert p.decide(page(), failed)["route"] == "retry"
+    assert plan_fn.call_count == 1
+
+
+def test_found_scroll_with_steps_still_queued_does_not_replan():
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    p, plan_fn = pilot([cont(scroll, CLICK_GO)])
+    p.decide(page(), [])
+    d = p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
+    assert d["choice"] == "e3" and plan_fn.call_count == 1

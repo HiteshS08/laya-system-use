@@ -21,3 +21,12 @@ def test_summary_counts_categories_routes_and_medians():
     assert s["routes"] == {"resolver": 1, "actor": 1, "planner_pick": 1}
     assert s["median_decision_ms"] == 1200 and s["median_actor_ms"] == 750
     assert s["median_planner_ms"] == 2250 and s["wall_s_per_action"] == 5.0
+
+
+def test_summary_counts_planner_calls_per_distinct_url():
+    moved = {**rec("c", "multi_page_flow", True, 0, 5.0, [], [{"latency_ms": 900}, {"latency_ms": 800}]),
+             "steps": [{"url_before": "https://a.test/", "url_after": "https://a.test/b"},
+                       {"url_before": "https://a.test/b", "url_after": "https://a.test/b#c"}]}
+    idle = rec("d", "below_fold", True, 0, 5.0, [], [{"latency_ms": 700}])
+    s = summarize([moved, idle])
+    assert s["planner_calls"] == 3 and s["planner_calls_per_url"] == 0.75

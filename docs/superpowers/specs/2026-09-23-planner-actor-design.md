@@ -190,6 +190,34 @@ Each live step records: planner call (prompt size, output, latency), route
 action, URL before/after, value. Post-run tags: `planner | resolver | actor | router | options | actuation |
 site`.
 
+### 5.10 Planner call budget (added 2026-09-26)
+Three live runs spent most of their time in the planner (median call 11.6–15.2 s against a 3 s target), and the
+planner was re-called after every failed step and every emptied queue. Target: on average ≤ 1 planner call per
+distinct URL in scripted Pilot scenarios (`scripts/count_plan_calls.py`). This section supersedes the "Runs:"
+line of 5.2 and the "1–3 steps" limit.
+
+- **Longer plans.** `MAX_STEPS` = 5. The planner is told to plan every step it can foresee on the current page,
+  up to one that loads a new page. The plan's `max_tokens` rises from 256 to 384 to leave room for five steps.
+- **Deterministic completion.** A continue plan may carry `done_when`: a phrase of at most 80 characters that the
+  page text or title will show once the goal is met (ideally the final page's title). It is validated like the
+  other fields (non-string or over 80 characters rejects the plan); a phrase the current page already shows, or
+  one with no letters or digits, is dropped, since it cannot signal a change. After each executed action, before
+  any planner call, the Pilot looks for the phrase with `resolver.normalize` (whole words) in the full page text
+  and the title. If found, the Pilot returns DONE with the phrase as evidence (route `done_when`) and makes no
+  planner call. The phrase stays active across URL changes until a new plan replaces it.
+- **Retry before replanning.** When an element step had no effect and it was routed through the actor
+  (`actor` or `planner_pick`), it is retried once on the actor's next-ranked candidate from that same decision
+  that is still usable (not excluded by StepMemory), route `retry`, no model call. Replan only when the retry
+  also has no effect, or when there is no alternative (a resolver-routed step, a tool step, a sole candidate,
+  or no usable next candidate).
+- **Replan triggers.** Exactly three: a URL change (fragment included); a queue exhausted without `done_when`
+  being met; the retry rule exhausted. A step with no routable element counts as "no alternative" and replans
+  as before. Nothing else triggers a replan.
+- **View.** After a successful SCROLL_TO_TEXT on the current page, the planner view adds `focus_text`: about 300
+  characters of visible text centred on the first case-insensitive occurrence of the scroll target, taken out of
+  `visible_text`'s 600 so the request budget is unchanged. Evidence may quote it; the evidence check itself
+  always searches the full page text and title.
+
 ## 6. Actor retraining (Phase C)
 
 Data: the existing Mind2Web train pipeline with three changes, applied identically for every actor.

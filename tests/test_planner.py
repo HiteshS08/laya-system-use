@@ -94,10 +94,11 @@ def test_invalid_plans_are_rejected(bad):
         planner.parse_plan(bad, PAGE)
 
 
-def test_long_instruction_is_cut_and_steps_capped_at_three():
+def test_long_instruction_is_cut_and_steps_capped_at_five():
     long = " ".join(["word"] * 30)
-    p = planner.parse_plan({"status": "continue", "evidence": "", "steps": [step(instruction=long)] * 5}, PAGE)
-    assert len(p.steps) == 3 and len(p.steps[0].instruction.split()) == planner.INSTRUCTION_WORDS
+    p = planner.parse_plan({"status": "continue", "evidence": "", "steps": [step(instruction=long)] * 7}, PAGE)
+    assert planner.MAX_STEPS == 5
+    assert len(p.steps) == 5 and len(p.steps[0].instruction.split()) == planner.INSTRUCTION_WORDS
 
 
 def test_plan_retries_once_on_an_invalid_plan_then_succeeds():
@@ -146,7 +147,7 @@ def test_plan_records_prompt_tokens_and_sends_compact_json():
     assert p.prompt_tokens == 812
     sent = complete.call_args.args[1]
     assert ", " not in sent[:40] and '": ' not in sent
-    assert complete.call_args.kwargs["max_tokens"] == 256
+    assert complete.call_args.kwargs["max_tokens"] == planner.PLAN_MAX_TOKENS
 
 
 def test_search_query_returns_the_stripped_query_or_none():
@@ -202,3 +203,41 @@ def test_request_with_focus_text_fits_the_prompt_budget_on_a_large_page():
     assert "focus_text" in view
     payload = json.dumps(view, ensure_ascii=False, separators=(",", ":"))
     assert len(planner.PLANNER_SYSTEM) + len(payload) <= 4800
+
+
+def continue_with(done_when):
+    return {"status": "continue", "evidence": "", "done_when": done_when, "steps": [step()]}
+
+
+def test_done_when_is_kept_stripped_and_optional():
+    assert planner.parse_plan(continue_with("  Typhoid fever - Wikipedia "), PAGE).done_when == \
+        "Typhoid fever - Wikipedia"
+    assert planner.parse_plan({"status": "continue", "evidence": "", "steps": [step()]}, PAGE).done_when == ""
+    assert planner.parse_plan(continue_with(None), PAGE).done_when == ""
+    assert planner.parse_plan(continue_with(""), PAGE).done_when == ""
+
+
+@pytest.mark.parametrize("bad", [7, ["Typhoid fever"], "x" * (planner.DONE_WHEN_CHARS + 1)])
+def test_invalid_done_when_rejects_the_plan(bad):
+    with pytest.raises(ValueError, match="done_when"):
+        planner.parse_plan(continue_with(bad), PAGE)
+
+
+def test_done_when_the_page_already_shows_or_without_words_is_dropped():
+    assert planner.parse_plan(continue_with("mary mallon"), PAGE).done_when == ""  # in the text
+    assert planner.parse_plan(continue_with("The Free Encyclopedia"), PAGE).done_when == ""  # in the title
+    assert planner.parse_plan(continue_with(" -- "), PAGE).done_when == ""
+
+
+def test_shows_phrase_matches_whole_words_in_text_or_title_after_normalizing():
+    page = {"text": "Typhoid fever is a feverish disease.", "title": "Typhoid fever \u2013 Wikipedia"}
+    assert planner.shows_phrase("typhoid FEVER - wikipedia", page)
+    assert planner.shows_phrase("a feverish disease", page)
+    assert not planner.shows_phrase("fever disease", page)
+    assert not planner.shows_phrase("typhoid fev", page)
+    assert not planner.shows_phrase("--", page)
+
+
+def test_prompt_asks_for_done_when_and_every_foreseeable_step():
+    assert "done_when" in planner.PLANNER_SYSTEM and "1-5" in planner.PLANNER_SYSTEM
+    assert "every step you can foresee" in planner.PLANNER_SYSTEM
