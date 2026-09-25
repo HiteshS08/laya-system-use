@@ -17,6 +17,16 @@ from .verifier import completion_verdict
 log = logging.getLogger("agent")
 
 
+def _blocked_by_repeated_no_change(history: list[dict]) -> bool:
+    """Three actions in a row with no visible effect (and no deliberate wait) means the run is stuck.
+
+    Applies equally to element actions and tool actions (SCROLL_TO_TEXT/GOTO): a tool that keeps reporting
+    tool_ok without ever changing the page is just as stuck as a click that keeps doing nothing.
+    """
+    repeated = history[-3:]
+    return len(repeated) == 3 and all(h["page_changed"] is False and h["kind"] != "wait" for h in repeated)
+
+
 class Agent:
     def __init__(self, url, goals, *, record_dir=None, screenshots=False):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
@@ -168,12 +178,7 @@ class Agent:
                 (self.record_dir / f"{state['elapsed_ms']:06d}.jpg").write_bytes(
                     base64.b64decode(state["page"]["screenshot"])
                 )
-            repeated = state["history"][-3:]
-            state["status"] = (
-                "blocked"
-                if len(repeated) == 3 and all(h["page_changed"] is False and h["kind"] != "wait" for h in repeated)
-                else "ready"
-            )
+            state["status"] = "blocked" if _blocked_by_repeated_no_change(state["history"]) else "ready"
             if state["status"] == "ready" and os.environ.get("POLICY_BACKEND") == "laya":
                 verdict = completion_verdict(state)
                 if verdict:
@@ -188,6 +193,9 @@ class Agent:
 
     def _act_tool(self, decision, page):
         state = self.state
+        if len(state["history"]) >= MAX_STEPS:
+            state["status"] = "blocked"
+            raise ValueError(f"Stopped at the {MAX_STEPS}-action demo budget")
         tool = decision["tool"]
         try:
             ran = run_tool(state["browser"], tool["operation"], tool["arg"])
@@ -208,7 +216,7 @@ class Agent:
                                         url=state["page"]["url"])
         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         state["history"][-1]["elapsed_ms"] = state["elapsed_ms"]
-        state["status"] = "ready"
+        state["status"] = "blocked" if _blocked_by_repeated_no_change(state["history"]) else "ready"
         return self.snapshot()
 
     def run(self):

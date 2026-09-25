@@ -398,6 +398,28 @@ def test_element_history_entry_records_the_role(runner):
     assert runner.state["history"][-1]["role"] == "button"
 
 
+def tool_decision(arg="Something"):
+    return {**decision("TOOL"), "operation": "SCROLL_TO_TEXT", "route": "planner",
+            "tool": {"operation": "SCROLL_TO_TEXT", "arg": arg}, "probabilities": {"TOOL": 1.0}}
+
+
+def test_three_consecutive_tool_actions_without_change_block_the_run(runner, monkeypatch):
+    monkeypatch.setattr(loop, "run_tool", Mock(return_value=False))  # never changes the page
+    for arg in ("A", "B", "C"):
+        runner.state["decision"] = tool_decision(arg)
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert len(runner.state["history"]) == 3
+    assert runner.state["status"] == "blocked"
+
+
+def test_tool_action_at_the_max_steps_budget_is_blocked(runner):
+    runner.state["history"] = [{}] * loop.MAX_STEPS
+    runner.state["decision"] = tool_decision()
+    with pytest.raises(ValueError, match=f"Stopped at the {loop.MAX_STEPS}-action demo budget"):
+        runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert runner.state["status"] == "blocked"
+
+
 @pytest.mark.parametrize("value", [False, None, "", "   ", "false", "True", "null", "None", "x" * 2001])
 def test_literal_or_empty_values_are_never_typed(value):
     with pytest.raises(ValueError, match="nothing typed"):

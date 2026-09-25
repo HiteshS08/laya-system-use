@@ -256,16 +256,45 @@ def test_search_query_is_asked_at_most_once_per_url_even_when_it_finds_nothing()
     search_fn.assert_called_once_with("Find Ada Lovelace")
 
 
-def test_found_scroll_and_focus_click_count_as_completed_steps():
+def test_changed_scroll_and_focus_click_count_as_completed_steps():
+    # The scroll DID change the page (e.g. expanded a collapsed section): a tool attempt only counts as
+    # completed when it is not a failure AND actually changed something, not merely "found the text".
     scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
     click_search = PlanStep("CLICK", "Search", "", "Click Search.")
     p, plan_fn = pilot([cont(scroll), cont(click_search), cont(CLICK_GO)])
     p.decide(page(), [])
-    p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
-    history = [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True),
+    p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=True, tool_ok=True)])
+    history = [done_entry("External links", op="SCROLL_TO_TEXT", changed=True, tool_ok=True),
                done_entry("Open Search", op="CLICK", role="searchbox", changed=False)]
     p.decide(page(), history)
     assert plan_fn.call_args.args[3] == ["Scroll to the External links heading.", "Click Search."]
+
+
+def test_found_but_unchanged_scroll_does_not_count_as_a_completed_step():
+    # The scroll found the text (tool_ok=True) but the page did not change: not a failure, but not progress.
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    p, plan_fn = pilot([cont(scroll), cont(CLICK_GO)])
+    p.decide(page(), [])
+    p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
+    assert plan_fn.call_args.args[3] == []
+
+
+def test_stall_from_distinct_scrolls_that_keep_finding_text_without_changing_the_page():
+    # Each scroll finds its own (different) heading (tool_ok=True) but the page never visibly changes. Under
+    # the round-1 "not a failure" rule alone this looked like steady progress on four different targets and
+    # _stalled() never tripped; the round-2 fix (tool completion also needs outcome != "no_change") restores
+    # detection.
+    labels = ("Section A", "Section B", "Section C", "Section D")
+    steps = [PlanStep("SCROLL_TO_TEXT", label, "", f"Scroll to {label}.") for label in labels]
+    p, plan_fn = pilot([cont(s) for s in steps])
+    history = []
+    for label in labels:
+        d = p.decide(page(), history)
+        assert d["choice"] == "TOOL"
+        history = [*history, done_entry(label, op="SCROLL_TO_TEXT", changed=False, tool_ok=True)]
+    d = p.decide(page(), history)
+    assert d["choice"] == "BLOCKED"
+    assert plan_fn.call_count == 4  # the block is detected before a 5th plan is requested
 
 
 def test_any_goto_decision_marks_the_search_fallback_as_already_used():

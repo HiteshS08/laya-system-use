@@ -23,6 +23,19 @@ MAX_PLANS_PER_DECISION = 2
 TOOL_OPERATIONS = ("SCROLL_TO_TEXT", "GOTO")
 
 
+def _counts_as_completed(attempt) -> bool:
+    """Whether a step's attempt should be reported to the planner as done, and count toward stall detection.
+
+    An element attempt only needs to not be a failure (a TYPE_TEXT, or a focus click, can succeed without any
+    visible page change). A tool attempt (SCROLL_TO_TEXT/GOTO) additionally needs the page to have actually
+    changed: a scroll that merely confirms text is already on screen is not a failure, but it is not progress
+    either, and crediting it as "done" would hide a loop of distinct-but-inert scroll targets from _stalled().
+    """
+    if attempt.tool_ok is not None:
+        return not is_failure(attempt) and attempt.outcome != "no_change"
+    return not is_failure(attempt)
+
+
 class Pilot:
     def __init__(self, goal: str, *, plan_fn: Callable = plan, pick_fn: Callable = pick,
                  predict: Callable = policy.laya_predict, fallback: Callable = policy.decide,
@@ -87,7 +100,7 @@ class Pilot:
         self.memory.sync(history)
         if self._pending and self._pending[0] < len(history):
             index, step = self._pending
-            if not is_failure(self.memory.attempts[index]):
+            if _counts_as_completed(self.memory.attempts[index]):
                 self._completed.append(step.instruction)
             self._pending = None
         self._completed_at.extend([len(self._completed)] * (len(self.memory.attempts) - known))
