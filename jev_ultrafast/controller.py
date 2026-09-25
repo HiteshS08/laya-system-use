@@ -5,6 +5,7 @@ preset element -> ordinal group -> exact/fuzzy label -> Laya. The only LLM call 
 """
 
 import logging
+import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -20,7 +21,7 @@ from .memory import EDITABLE_ROLES
 from .model import action_space
 from .program import Program, Subgoal, render_program
 from .pruning import prune_actions
-from .resolver import resolve
+from .resolver import normalize, resolve
 from .search import SearchTemplates, learn_template
 from .tactics import Progress, Step, matching_option, next_step
 
@@ -37,6 +38,7 @@ class _Pending:
     subgoal: int
     step: Step
     index: str | None
+    label: str
 
 
 def _missed(entry: Mapping) -> bool:
@@ -53,7 +55,7 @@ def _missed(entry: Mapping) -> bool:
 
 def _effects(step: Step) -> dict:
     flags = {"TYPE_TEXT": "typed", "SUBMIT": "submitted", "GOTO": "searched", "SCROLL_TO_TEXT": "scrolled"}
-    purposes = {"open_search": "opened_search", "open": "opened", "pick": "picked"}
+    purposes = {"open_search": "opened_search", "open": "opened", "pick": "picked", "submit": "submitted"}
     effects = {}
     if step.operation in flags:
         effects[flags[step.operation]] = True
@@ -62,6 +64,10 @@ def _effects(step: Step) -> dict:
     if step.purpose == "act" and step.operation in ("CLICK", "SELECT", "SUBMIT"):
         effects["acted"] = True
     return effects
+
+
+def _document(url: str) -> str:
+    return urldefrag(url)[0]
 
 
 def _evidence(sub: Subgoal, page: Mapping) -> str:
@@ -90,14 +96,15 @@ class Controller:
         self.actor_calls = 0
         self._current = 0
         self._progress = Progress()
-        self._excluded: set[str] = set()
+        self._excluded: set[tuple[str, str]] = set()  # (document url, normalized label) that had no effect
         self._start_url: str | None = None
         self._pending: _Pending | None = None
         self._asked_hosts: set[str] = set()
 
     @classmethod
     def from_goal(cls, goal: str, *, compile_fn: Callable | None = None, **deps) -> "Controller":
-        program, meta = (compile_fn or compile_goal)(goal, cache=default_cache())
+        cache = default_cache() if os.environ.get("LAYA_PROGRAM_CACHE", "1") != "0" else None
+        program, meta = (compile_fn or compile_goal)(goal, cache=cache)
         log.info("compiled goal (%s): %s", meta.get("source"), render_program(program).replace("\n", " | "))
         return cls(goal, program, compile_meta=meta, **deps)
 
@@ -117,7 +124,8 @@ class Controller:
         if p.misses >= MAX_MISSES_PER_SUBGOAL or p.actions >= MAX_ACTIONS_PER_SUBGOAL:
             return self._stop("BLOCKED", f"{sub.kind} {sub.target}: {p.actions} actions, {p.misses} without effect",
                               started)
-        usable = [e for e in elements if e["index"] not in self._excluded]
+        here = _document(page["url"])
+        usable = [e for e in elements if (here, normalize(e["label"])) not in self._excluded]
         template = self._template(page["url"]) if sub.kind == "FIND" else None
         step = next_step(sub, page, usable, p, template)
         if step is None:
@@ -125,7 +133,8 @@ class Controller:
         decision = self._act(step, usable, elements, targets, history, started)
         if decision is None:
             return self._stop("BLOCKED", f"{sub.kind} {sub.target}: no element for {step.instruction}", started)
-        self._pending = _Pending(len(history), self._current, step, decision["target"])
+        label = next((e["label"] for e in elements if e["index"] == decision["target"]), "")
+        self._pending = _Pending(len(history), self._current, step, decision["target"], label)
         self.trace.append({"subgoal": self._current, "kind": sub.kind, "route": decision["route"],
                            "step": asdict(step), "progress": asdict(p)})
         return decision
@@ -141,11 +150,11 @@ class Controller:
         p = self._progress
         if _missed(entry):
             if pending.index is not None:
-                self._excluded.add(pending.index)
+                self._excluded.add((_document(entry.get("url_before") or ""), normalize(pending.label)))
             self._progress = replace(p, actions=p.actions + 1, misses=p.misses + 1)
             return
         self._progress = replace(p, actions=p.actions + 1, **_effects(pending.step))
-        if pending.step.operation == "SUBMIT" and pending.step.purpose == "search":
+        if pending.step.purpose in ("search", "submit") and pending.step.operation != "TYPE_TEXT":
             template = learn_template(entry.get("url") or "", self.program.subgoals[self._current].target)
             if template:
                 self._templates.put(entry["url"], template)

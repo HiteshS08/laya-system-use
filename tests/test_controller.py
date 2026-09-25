@@ -173,3 +173,31 @@ def test_decisions_have_the_shape_the_agent_needs():
         assert key in d
     assert d["probabilities"][d["choice"]] == 1.0
     assert c.trace[-1]["kind"] == "FIND" and c.trace[-1]["route"] == "tactic"
+
+
+def test_exclusions_follow_the_label_not_a_renumbered_index():
+    c = controller("OPEN Issues tab", predict=ranked("3", "4"))
+    c.decide(page(), [])  # picks e3 "Issues 5"
+    moved = [act(1, "Code"), act(2, "Issues 5"), act(3, "Pulls")]
+    d = c.decide(page(actions=moved), [entry("Issues 5", changed=False)])
+    offered = c._predict.call_args.args[1]["click_target"]["criteria"]
+    assert "2" not in offered and d["choice"] in {"e1", "e3"}
+
+
+def test_enter_that_does_not_submit_falls_back_to_a_search_button():
+    actions = [act(1, "Search", "fill", "searchbox"), act(2, "Search", role="button")]
+    c = controller("FIND Ada Lovelace")
+    c.decide(page(actions=actions), [])
+    h = [entry("Search", op="TYPE_TEXT", kind="fill", role="searchbox", changed=False, text="Ada Lovelace")]
+    assert c.decide(page(actions=actions), h)["tool"]["operation"] == "SUBMIT"
+    h.append(entry("", op="SUBMIT", kind="tool", changed=False, tool_ok=True))
+    d = c.decide(page(actions=actions), h)
+    assert (d["choice"], d["route"]) == ("e2", "tactic")
+
+
+def test_program_cache_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv("LAYA_PROGRAM_CACHE", "0")
+    compile_fn = Mock(return_value=(parse_program("FIND Ada"), {"source": "compiler"}))
+    Controller.from_goal("Find Ada", compile_fn=compile_fn, predict=Mock(), fallback=Mock(),
+                         discover=Mock(return_value=None), templates=SearchTemplates())
+    assert compile_fn.call_args.kwargs["cache"] is None

@@ -24,7 +24,7 @@ class Step:
     index: str | None = None  # preset element chosen deterministically by the tactic
     roles: frozenset[str] = frozenset()
     templates: tuple[str, ...] = ()
-    purpose: str = "act"  # act | search | open_search | open | pick | result
+    purpose: str = "act"  # act | search | submit | open_search | open | pick | result
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,7 @@ def _search_field(elements: Sequence[Mapping]) -> Mapping | None:
 
 
 def _search_opener(elements: Sequence[Mapping]) -> Mapping | None:
+    """A button or link that says 'search' (opens a collapsed search box, or submits a typed one)."""
     return next((e for e in elements if _can(e, "CLICK") and not _can(e, "TYPE_TEXT")
                  and e.get("role") in {"button", "link"} and "search" in normalize(e.get("label", "")).split()), None)
 
@@ -87,6 +88,10 @@ def _find(sub: Subgoal, elements: Sequence[Mapping], progress: Progress, templat
             return Step("CLICK", opener["label"], "", instruction("OPEN_SEARCH"), index=opener["index"],
                         purpose="open_search")
     elif progress.typed and not progress.submitted:
+        button = _search_opener(elements) if progress.misses else None
+        if button is not None:  # Enter did nothing: press the search button instead
+            return Step("CLICK", button["label"], "", instruction("CLICK", button["label"]), index=button["index"],
+                        purpose="submit")
         return Step("SUBMIT", "", "", instruction("SUBMIT"), purpose="search")
     return Step("CLICK", name, "", instruction("RESULT", name), purpose="result")
 

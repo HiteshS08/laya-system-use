@@ -105,3 +105,9 @@ def test_scroll_submit_click_and_do():
     assert next_step(Subgoal("SUBMIT", "Search"), PAGE, [], Progress()).operation == "CLICK"
     assert next_step(Subgoal("CLICK", "One way"), PAGE, [], Progress()).operation == "CLICK"
     assert next_step(Subgoal("DO", "Buy milk"), PAGE, [], Progress()).operation == "DO"
+
+
+def test_find_clicks_a_search_button_when_enter_did_nothing():
+    elements = els(("Search", "searchbox", ["TYPE_TEXT"]), ("Search", "button", ["CLICK"]))
+    step = next_step(Subgoal("FIND", "Ada"), PAGE, elements, Progress(typed=True, misses=1))
+    assert (step.operation, step.index, step.purpose) == ("CLICK", "2", "submit")
