@@ -65,6 +65,12 @@ def test_click_with_empty_target_text_still_raises():
         planner.parse_plan({"status": "continue", "evidence": "", "steps": [step(target_text="")]}, PAGE)
 
 
+def test_type_text_with_empty_target_and_empty_value_still_raises():
+    raw = {"operation": "TYPE_TEXT", "target_text": "", "value": "", "instruction": "Type into Search."}
+    with pytest.raises(ValueError):
+        planner.parse_plan({"status": "continue", "evidence": "", "steps": [raw]}, PAGE)
+
+
 def test_done_needs_a_quote_the_page_shows_regardless_of_case_accents_and_spacing():
     ok = planner.parse_plan({"status": "done", "evidence": "mary  MALLON was an irish-born cook", "steps": []}, PAGE)
     assert ok.status == "done"

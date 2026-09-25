@@ -8,7 +8,7 @@ from urllib.parse import quote_plus
 
 from . import policy
 from .formatter import history_strings
-from .memory import StepMemory
+from .memory import StepMemory, is_failure
 from .model import action_space
 from .planner import Plan, PlanStep, pick, plan, search_query
 from .pruning import prune_actions
@@ -40,7 +40,8 @@ class Pilot:
         self._pending: tuple[int, PlanStep] | None = None  # (history index, step) of the last decision
         self._unroutable: dict[str, list[str]] = {}
         self._planner_failed: set[str] = set()  # urls where the planner raised; skip straight to fallback there
-        self._searched = False  # whether the search fallback has already issued a GOTO in this run
+        self._searched = False  # whether a GOTO decision (planner or search fallback) has issued in this run
+        self._search_tried: set[str] = set()  # urls already asked for a search query, found or not
 
     def decide(self, page: Mapping, history: Sequence[Mapping]) -> dict:
         started = time.perf_counter()
@@ -86,8 +87,7 @@ class Pilot:
         self.memory.sync(history)
         if self._pending and self._pending[0] < len(history):
             index, step = self._pending
-            if self.memory.attempts[index].outcome != "no_change" or \
-                    self.memory.attempts[index].operation == "TYPE_TEXT":
+            if not is_failure(self.memory.attempts[index]):
                 self._completed.append(step.instruction)
             self._pending = None
         self._completed_at.extend([len(self._completed)] * (len(self.memory.attempts) - known))
@@ -147,6 +147,10 @@ class Pilot:
 
     def _decision(self, choice: str, step: PlanStep, routed: Routed, started: float, *,
                   tool: dict | None = None) -> dict:
+        if tool and tool.get("operation") == "GOTO":
+            # Any GOTO - planner-issued or the search fallback's own - is a navigation away from this page;
+            # the search fallback must not also navigate, so treat one as having already happened.
+            self._searched = True
         actor = routed.actor
         return {
             "choice": choice, "operation": step.operation, "target": routed.index,
@@ -176,12 +180,12 @@ class Pilot:
 
     def _search_fall_back(self, page: Mapping, started: float) -> dict | None:
         template = search_template(page["url"])
-        if template is None:
+        if template is None or page["url"] in self._search_tried:
             return None
+        self._search_tried.add(page["url"])
         query = self._search_query(self.goal)
         if not query:
             return None
-        self._searched = True
         url = template.replace("{q}", quote_plus(query))
         step = PlanStep("GOTO", url, "", f'Search the site for "{query}".')
         tool = {"operation": "GOTO", "arg": url}

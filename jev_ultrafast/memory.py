@@ -40,7 +40,7 @@ def _attempt(entry: Mapping) -> Attempt:
                    str(entry.get("role") or ""), entry.get("tool_ok"))
 
 
-def _is_failure(attempt: Attempt) -> bool:
+def is_failure(attempt: Attempt) -> bool:
     # A tool's success is reported directly; trust it over the page-change heuristic below.
     if attempt.tool_ok is not None:
         return attempt.tool_ok is False
@@ -72,7 +72,7 @@ class StepMemory:
         reasons: dict[tuple[str, str], tuple[str, str]] = {}
         for a in here:
             key = (a.operation, a.label)
-            if _is_failure(a):
+            if is_failure(a):
                 reasons[key] = (a.display, "no effect")
             elif counts[key] >= REPEAT_LIMIT and key not in reasons:
                 reasons[key] = (a.display, "repeated")
@@ -85,7 +85,7 @@ class StepMemory:
         return [f"{op} {display} ({why})" for (op, _), (display, why) in self._reasons(url).items()]
 
     def last_failed(self) -> bool:
-        return bool(self._attempts) and _is_failure(self._attempts[-1])
+        return bool(self._attempts) and is_failure(self._attempts[-1])
 
     def streak_without_url_change(self) -> int:
         streak = 0

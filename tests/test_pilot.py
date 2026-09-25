@@ -244,3 +244,37 @@ def test_planner_failure_without_a_search_template_uses_the_actor_only_fallback(
     p, plan_fn = pilot([ValueError("no valid plan")], fallback=fallback)
     d = p.decide(page(), [])  # example.test has no registered search template
     assert d["route"] == "planner_fallback" and d["choice"] == "e3"
+
+
+def test_search_query_is_asked_at_most_once_per_url_even_when_it_finds_nothing():
+    search_fn = Mock(return_value=None)
+    fallback = Mock(return_value={"choice": "e3", "operation": "CLICK", "probabilities": {"e3": 0.7}})
+    p, plan_fn = pilot([ValueError("no valid plan")], fallback=fallback, search_query_fn=search_fn)
+    wiki = page(url="https://en.wikipedia.org/wiki/Main_Page")
+    p.decide(wiki, [])
+    p.decide(wiki, [])
+    search_fn.assert_called_once_with("Find Ada Lovelace")
+
+
+def test_found_scroll_and_focus_click_count_as_completed_steps():
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    click_search = PlanStep("CLICK", "Search", "", "Click Search.")
+    p, plan_fn = pilot([cont(scroll), cont(click_search), cont(CLICK_GO)])
+    p.decide(page(), [])
+    p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
+    history = [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True),
+               done_entry("Open Search", op="CLICK", role="searchbox", changed=False)]
+    p.decide(page(), history)
+    assert plan_fn.call_args.args[3] == ["Scroll to the External links heading.", "Click Search."]
+
+
+def test_any_goto_decision_marks_the_search_fallback_as_already_used():
+    goto_step = PlanStep("GOTO", "https://en.wikipedia.org/w/index.php?search=Ada+Lovelace&title=Special%3ASearch&go=Go",
+                          "", "Search the site for Ada Lovelace.")
+    search_fn = Mock(side_effect=AssertionError("search must not be called"))
+    fallback = Mock(return_value={"choice": "e3", "operation": "CLICK", "probabilities": {"e3": 0.7}})
+    p, plan_fn = pilot([cont(goto_step), ValueError("no valid plan")], fallback=fallback, search_query_fn=search_fn)
+    d1 = p.decide(page(url="https://en.wikipedia.org/wiki/Main_Page"), [])
+    assert d1["tool"]["operation"] == "GOTO"
+    d2 = p.decide(page(url="https://en.wikipedia.org/wiki/Ada_Lovelace"), [])
+    assert d2["route"] == "planner_fallback" and d2["choice"] == "e3"
