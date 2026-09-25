@@ -465,3 +465,13 @@ def test_link_click_tolerates_context_loss_while_waiting(monkeypatch):
     monkeypatch.setattr(b.time, "sleep", Mock())
     br.observe(screenshot=False)
     assert br.evaluate.call_count == 1
+
+
+def test_tool_templates_reach_run_tool(runner, monkeypatch):
+    run_tool = Mock(return_value=True)
+    monkeypatch.setattr(loop, "run_tool", run_tool)
+    runner.state["decision"] = {**decision("TOOL"), "operation": "GOTO", "route": "tactic",
+                                "tool": {"operation": "GOTO", "arg": "https://ex.test/?q=a",
+                                         "templates": ["https://ex.test/?q={q}"]}, "probabilities": {"TOOL": 1.0}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert run_tool.call_args.kwargs["templates"] == ["https://ex.test/?q={q}"]

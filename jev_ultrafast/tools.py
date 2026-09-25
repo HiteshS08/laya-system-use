@@ -1,7 +1,10 @@
-"""Non-element actions the planner may take: scroll to text, and go to a registered site-search URL."""
+"""Non-element actions: scroll to text, go to a site-search URL rendered by code, press Enter to submit."""
 
 import re
+from collections.abc import Sequence
 from urllib.parse import urlsplit
+
+from .search import matches_template
 
 # Sites with a stable GET search. The planner may only navigate to a rendering of one of these.
 SEARCH_TEMPLATES = {
@@ -19,12 +22,16 @@ def is_allowed_goto(url: str) -> bool:
     return any(pattern.fullmatch(url) for pattern in _ALLOWED)
 
 
-def run_tool(browser, operation: str, arg: str) -> bool:
+def run_tool(browser, operation: str, arg: str, *, templates: Sequence[str] = ()) -> bool:
+    """GOTO only to a URL rendered from the static registry or from a template the controller handed over."""
     if operation == "GOTO":
-        if not is_allowed_goto(arg):
+        if not (is_allowed_goto(arg) or any(matches_template(arg, t) for t in templates)):
             raise ValueError(f"GOTO target is not a registered search URL: {arg!r}; not navigating.")
         browser.navigate(arg)
         return True
     if operation == "SCROLL_TO_TEXT":
         return browser.scroll_to_text(arg)
+    if operation == "SUBMIT":
+        browser.press_enter()
+        return True
     raise ValueError(f"Unknown tool operation {operation!r}")

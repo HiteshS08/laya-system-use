@@ -198,7 +198,7 @@ class Agent:
             raise ValueError(f"Stopped at the {MAX_STEPS}-action demo budget")
         tool = decision["tool"]
         try:
-            ran = run_tool(state["browser"], tool["operation"], tool["arg"])
+            ran = run_tool(state["browser"], tool["operation"], tool["arg"], templates=tool.get("templates", ()))
         except ValueError as exc:
             log.warning("tool rejected: %s", exc)
             ran = False

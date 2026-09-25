@@ -57,19 +57,44 @@ class Browser:
     def call(self, method, **params):
         return cdp(method, session_id=self.session, **params)
 
-    def evaluate(self, expression):
-        response = self.call("Runtime.evaluate", expression=expression, returnByValue=True)
+    def evaluate(self, expression, await_promise=False):
+        params = {"awaitPromise": True} if await_promise else {}
+        response = self.call("Runtime.evaluate", expression=expression, returnByValue=True, **params)
         if response.get("exceptionDetails"):
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
 
     def navigate(self, url: str) -> None:
         self.call("Page.navigate", url=url)
+        self._wait_loaded()
+
+    def _wait_loaded(self) -> None:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            if self.evaluate("document.readyState") == "complete":
-                break
+            try:
+                if self.evaluate("document.readyState") == "complete":
+                    break
+            except (StalePage, RuntimeError):
+                pass  # the old document is being torn down; keep polling the new one
             time.sleep(0.02)
+
+    def press_enter(self) -> None:
+        """Enter in the focused element (submits a search or form), then wait for any navigation it starts."""
+        before = self.evaluate("location.href")
+        for kind in ("keyDown", "keyUp"):
+            extra = {"text": "\r"} if kind == "keyDown" else {}
+            self.call("Input.dispatchKeyEvent", type=kind, key="Enter", code="Enter", windowsVirtualKeyCode=13,
+                      nativeVirtualKeyCode=13, **extra)
+        self.after_input = None
+        deadline = time.monotonic() + NAVIGATION_WAIT_S
+        while time.monotonic() < deadline:
+            try:
+                if self.evaluate("location.href") != before:
+                    break
+            except (StalePage, RuntimeError):
+                break
+            time.sleep(0.05)
+        self._wait_loaded()
 
     def scroll_to_text(self, text: str) -> bool:
         return bool(self.evaluate(f"{SCROLL_TO_TEXT}({json.dumps(text)})"))
