@@ -162,3 +162,43 @@ def test_pick_returns_an_offered_id_or_none():
     assert planner.pick(s, options, "g", complete=Mock(return_value=({"option": "16"}, {}))) == "16"
     assert planner.pick(s, options, "g", complete=Mock(return_value=({"option": None}, {}))) is None
     assert planner.pick(s, options, "g", complete=Mock(return_value=({"option": "99"}, {}))) is None
+
+
+def test_focus_text_is_centred_on_the_scroll_target_beyond_the_visible_text_cut():
+    text = "Contents intro " + "a" * 900 + " See also External links Official website " + "b" * 900
+    view = planner.planner_view("Scroll to External links", {**PAGE, "text": text}, ELEMENTS, [], [],
+                                focus="external LINKS")
+    focus = view["focus_text"]
+    assert "External links" in focus and "External links" not in view["visible_text"]
+    assert len(focus) <= planner.FOCUS_CHARS
+    centre = focus.index("External links") + len("External links") // 2
+    assert abs(centre - len(focus) // 2) <= 2
+
+
+def test_focus_text_is_absent_without_a_target_or_when_the_target_is_not_shown():
+    assert "focus_text" not in planner.planner_view("g", PAGE, ELEMENTS, [], [])
+    assert "focus_text" not in planner.planner_view("g", PAGE, ELEMENTS, [], [], focus="External links")
+
+
+def test_focus_text_near_the_start_of_the_text_is_not_cut_short():
+    view = planner.planner_view("g", {**PAGE, "text": "External links " + "c" * 900}, ELEMENTS, [], [],
+                                focus="External links")
+    assert view["focus_text"].startswith("External links") and len(view["focus_text"]) == planner.FOCUS_CHARS
+
+
+def test_prompt_says_evidence_may_come_from_focus_text():
+    assert "focus_text" in planner.PLANNER_SYSTEM.split("evidence", 1)[1].split(";", 1)[0]
+
+
+def test_done_evidence_is_checked_against_the_full_page_text_not_the_view():
+    far = {**PAGE, "text": "x" * 3000 + " External links heading here"}
+    assert planner.parse_plan({"status": "done", "evidence": "External links", "steps": []}, far).status == "done"
+
+
+def test_request_with_focus_text_fits_the_prompt_budget_on_a_large_page():
+    many = [el(i, "L" * 70, landmark="main", section="S" * 60, row_text="R" * 90) for i in range(1, 121)]
+    big = {**PAGE, "text": "x" * 3000 + "External links" + "y" * 3000, "outline": " | ".join(["Heading"] * 200)}
+    view = planner.planner_view("goal " * 20, big, many, ["done step"] * 12, ["failed"] * 12, focus="External links")
+    assert "focus_text" in view
+    payload = json.dumps(view, ensure_ascii=False, separators=(",", ":"))
+    assert len(planner.PLANNER_SYSTEM) + len(payload) <= 4800

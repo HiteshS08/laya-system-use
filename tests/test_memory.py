@@ -93,3 +93,13 @@ def test_tool_attempt_repeated_twice_is_excluded_even_when_it_succeeded():
             entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=True)])
     assert ("SCROLL_TO_TEXT", "external links") in m.excluded(P)
     assert "SCROLL_TO_TEXT External links (repeated)" in m.failed(P)
+
+
+def test_last_found_scroll_is_the_latest_successful_scroll_on_that_page():
+    m = StepMemory()
+    assert m.last_found_scroll(P) == ""
+    m.sync([entry("External links", op="SCROLL_TO_TEXT", changed=True, tool_ok=True),
+            entry("See also", op="SCROLL_TO_TEXT", changed=False, tool_ok=False),
+            entry("Read", changed=True)])
+    assert m.last_found_scroll(P + "#External_links") == "External links"
+    assert m.last_found_scroll("https://en.wikipedia.org/wiki/Other") == ""

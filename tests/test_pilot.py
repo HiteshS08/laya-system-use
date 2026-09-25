@@ -307,3 +307,21 @@ def test_any_goto_decision_marks_the_search_fallback_as_already_used():
     assert d1["tool"]["operation"] == "GOTO"
     d2 = p.decide(page(url="https://en.wikipedia.org/wiki/Ada_Lovelace"), [])
     assert d2["route"] == "planner_fallback" and d2["choice"] == "e3"
+
+
+def test_last_successful_scroll_target_is_passed_to_the_planner_as_focus():
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    p, plan_fn = pilot([cont(scroll), Plan("done", "External links", ())])
+    p.decide(page(), [])
+    assert plan_fn.call_args.kwargs["focus"] == ""
+    history = [done_entry("External links", op="SCROLL_TO_TEXT", changed=True, tool_ok=True)]
+    d = p.decide(page(text="Notes\nExternal links\nOfficial website"), history)
+    assert d["choice"] == "DONE" and plan_fn.call_args.kwargs["focus"] == "External links"
+
+
+def test_failed_scroll_is_not_a_focus_target():
+    scroll = PlanStep("SCROLL_TO_TEXT", "External links", "", "Scroll to the External links heading.")
+    p, plan_fn = pilot([cont(scroll), cont(CLICK_GO)])
+    p.decide(page(), [])
+    p.decide(page(), [done_entry("External links", op="SCROLL_TO_TEXT", changed=False, tool_ok=False)])
+    assert plan_fn.call_args.kwargs["focus"] == ""

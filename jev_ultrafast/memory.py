@@ -84,6 +84,11 @@ class StepMemory:
     def failed(self, url: str) -> list[str]:
         return [f"{op} {display} ({why})" for (op, _), (display, why) in self._reasons(url).items()]
 
+    def last_found_scroll(self, url: str) -> str:
+        """The target of the latest SCROLL_TO_TEXT on this page that found its text, as the planner wrote it."""
+        found = [a.display for a in self._on(url) if a.operation == "SCROLL_TO_TEXT" and a.tool_ok]
+        return found[-1] if found else ""
+
     def last_failed(self) -> bool:
         return bool(self._attempts) and is_failure(self._attempts[-1])
 

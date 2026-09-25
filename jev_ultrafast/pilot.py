@@ -118,7 +118,8 @@ class Pilot:
     def _replan(self, page: Mapping, elements: Sequence[Mapping]) -> Plan | None:
         failed = [*self.memory.failed(page["url"]), *self._unroutable.get(page["url"], [])]
         try:
-            result = self._plan(self.goal, page, elements, list(self._completed), failed)
+            result = self._plan(self.goal, page, elements, list(self._completed), failed,
+                                focus=self.memory.last_found_scroll(page["url"]))
         except (ValueError, RuntimeError) as exc:
             log.warning("planner failed on %s: %s", page["url"], exc)
             self.plans.append({"url": page["url"], "error": str(exc)})
