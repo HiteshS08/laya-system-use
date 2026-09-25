@@ -17,7 +17,7 @@ def title_subject(title: str) -> str:
     return _TITLE_SEPARATORS.split(title.strip(), maxsplit=1)[0].strip()
 
 
-def _forms(text: str) -> set[str]:
+def name_forms(text: str) -> set[str]:
     """A name and the same name without a trailing disambiguator: 'Python (programming language)' -> 'Python'."""
     return {f for f in (normalize(text), normalize(_PARENTHETICAL.sub("", text))) if f}
 
@@ -30,7 +30,7 @@ def is_about(page: Mapping, name: str) -> bool:
     want = normalize(name)
     if not want:
         return False
-    return any(want in _forms(text) for text in (title_subject(page.get("title", "")), _first_h1(page)) if text)
+    return any(want in name_forms(text) for text in (title_subject(page.get("title", "")), _first_h1(page)) if text)
 
 
 def fragment_names(url: str, section: str) -> bool:
