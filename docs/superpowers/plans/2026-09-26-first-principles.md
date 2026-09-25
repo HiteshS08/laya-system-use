@@ -1184,7 +1184,7 @@ before the first run. Then the commands in the overnight report's "Evaluate this
 ### D3 — Step-mode actor retraining (DEFERRED TO MAC/KAGGLE: Mind2Web data, GPUs)
 ```bash
 uv run python training/fetch_data.py train
-uv run python training/step_items.py --input data/mind2web/train/*.json --out training/out/step_train.jsonl --dev-mod 20 --seed 0
+uv run python training/step_items.py --input data/mind2web/data/train/*.json --out training/out/step_train.jsonl --dev-mod 20 --seed 0
 uv run python training/prepare_items.py --cases training/out/step_train.jsonl --out training/out/step_items.pt
 # upload step_items.pt to Kaggle, run training/train_ddp.py as in training/KAGGLE.md, then evaluate on dev:
 uv run python training/evaluate.py --predictor laya --checkpoint checkpoints/laya_step --cases training/out/step_train_dev.jsonl
