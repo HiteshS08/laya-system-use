@@ -4,14 +4,22 @@ import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from .candidates import Candidate
 from .formatter import RECENT_ACTIONS, TARGET_INSTRUCTIONS, render_option
-from .planner import PlanStep
 from .policy import _valid, candidates_from
 from .shortlister import shortlist
 
 Predict = Callable[[dict, dict], dict]
+
+
+class StepLike(Protocol):
+    """Anything that names an operation, the element text it means, and a one-sentence instruction."""
+
+    operation: str
+    target_text: str
+    instruction: str
 
 
 @dataclass(frozen=True)
@@ -28,7 +36,7 @@ def _context_enabled() -> bool:
     return os.environ.get("ACTOR_CONTEXT") == "1"
 
 
-def actor_request(step: PlanStep, candidates: Sequence[Candidate], recent: Sequence[str], *,
+def actor_request(step: StepLike, candidates: Sequence[Candidate], recent: Sequence[str], *,
                   context: bool = False) -> tuple[dict, dict]:
     state = {"goal": step.instruction, "recent_actions": list(recent)[-RECENT_ACTIONS:]}
     question = {"type": "choice", "instructions": TARGET_INSTRUCTIONS[step.operation],
@@ -36,7 +44,7 @@ def actor_request(step: PlanStep, candidates: Sequence[Candidate], recent: Seque
     return state, {f"{step.operation.lower()}_target": question}
 
 
-def pick_target(step: PlanStep, elements: Sequence[Mapping], recent: Sequence[str], *, predict: Predict) -> ActorPick:
+def pick_target(step: StepLike, elements: Sequence[Mapping], recent: Sequence[str], *, predict: Predict) -> ActorPick:
     started = time.perf_counter()
     pool = candidates_from(elements)
     if not pool:

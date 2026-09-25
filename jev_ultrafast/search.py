@@ -5,7 +5,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from urllib.parse import parse_qsl, quote_plus, urlsplit
+from urllib.parse import quote_plus, unquote_plus, urlsplit
 
 from .resolver import normalize
 
@@ -54,14 +54,18 @@ def template_from_opensearch(xml_text: str, page_url: str) -> str | None:
 
 
 def learn_template(url: str, query: str) -> str | None:
-    """The URL a typed search landed on, with the query's value replaced by {q}; None if the query is not in it."""
+    """The URL a typed search landed on, with the query's value replaced by {q}; None if the query is not in it.
+
+    Other parameters keep their original encoding, so the template renders exactly the URL the site produced.
+    """
     parts = urlsplit(url)
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
     want = normalize(query)
-    if not want or not any(normalize(v) == want for _, v in pairs):
+    raw_pairs = [p for p in parts.query.split("&") if p]
+    hit = [normalize(unquote_plus(p.partition("=")[2])) == want for p in raw_pairs]
+    if not want or not any(hit):
         return None
-    encoded = [f"{quote_plus(k)}={'{q}' if normalize(v) == want else quote_plus(v)}" for k, v in pairs]
-    return f"{parts.scheme}://{parts.netloc}{parts.path}?{'&'.join(encoded)}"
+    pairs = [f"{p.partition('=')[0]}={{q}}" if h else p for p, h in zip(raw_pairs, hit, strict=True)]
+    return f"{parts.scheme}://{parts.netloc}{parts.path}?{'&'.join(pairs)}"
 
 
 def render(template: str, query: str) -> str:
