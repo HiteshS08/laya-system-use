@@ -475,3 +475,32 @@ def test_tool_templates_reach_run_tool(runner, monkeypatch):
                                          "templates": ["https://ex.test/?q={q}"]}, "probabilities": {"TOOL": 1.0}}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
     assert run_tool.call_args.kwargs["templates"] == ["https://ex.test/?q={q}"]
+
+
+def test_program_backend_creates_a_controller(monkeypatch):
+    monkeypatch.setenv("POLICY_BACKEND", "program")
+    browser = Mock(observe=Mock(return_value=page()))
+    monkeypatch.setattr(loop, "Browser", Mock(return_value=browser))
+    made = Mock()
+    monkeypatch.setattr(loop.Controller, "from_goal", Mock(return_value=made))
+    agent = loop.Agent("https://example.test/", "Find a book")
+    assert agent.pilot is made
+    assert loop.Controller.from_goal.call_args.args[0] == "Find a book"
+    discover = loop.Controller.from_goal.call_args.kwargs["discover"]
+    browser.evaluate = Mock(return_value=None)
+    assert discover("https://example.test/") is None and browser.evaluate.called
+
+
+def test_history_records_observe_and_act_timings(runner):
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    entry = runner.state["history"][-1]
+    assert isinstance(entry["observe_ms"], int) and isinstance(entry["act_ms"], int)
+
+
+def test_tool_history_records_timings(runner, monkeypatch):
+    monkeypatch.setattr(loop, "run_tool", Mock(return_value=True))
+    runner.state["decision"] = tool_decision()
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    entry = runner.state["history"][-1]
+    assert isinstance(entry["observe_ms"], int) and isinstance(entry["act_ms"], int)

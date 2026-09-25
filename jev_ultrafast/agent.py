@@ -8,13 +8,19 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .browser import Browser, StalePage
+from .controller import Controller
 from .model import action_space, choose, field_context, field_text, valid_text_value
 from .pilot import Pilot
 from .questions import MAX_STEPS
+from .search import default_templates, discover
 from .tools import run_tool
 from .verifier import completion_verdict
 
 log = logging.getLogger("agent")
+
+
+def _ms_since(started: float) -> int:
+    return round((time.perf_counter() - started) * 1000)
 
 
 def _blocked_by_repeated_no_change(history: list[dict]) -> bool:
@@ -34,11 +40,16 @@ class Agent:
             raise ValueError("Supply a task")
         plan = [task]
         self.pending_text = None
-        self.pilot = Pilot(task) if os.environ.get("POLICY_BACKEND") == "planner" else None
+        backend = os.environ.get("POLICY_BACKEND")
+        self.pilot = Pilot(task) if backend == "planner" else None
         self.browser = Browser(url)
         self.record_dir = Path(record_dir) if record_dir else None
         self.screenshots = screenshots or bool(record_dir)
         try:
+            if backend == "program":
+                # The only LLM call of the run (none when the goal's program is cached).
+                self.pilot = Controller.from_goal(task, discover=lambda page_url: discover(self.browser, page_url),
+                                                  templates=default_templates())
             page = self.browser.observe(screenshot=self.screenshots)
         except Exception:
             self.browser.close()
@@ -138,7 +149,9 @@ class Agent:
                     self.pending_text = (context, text, helper)
                     state["text_calls"].append({**helper, "field": action["label"], "value": text})
             # Browser.act checks freshness immediately before input, including after text generation.
+            act_started = time.perf_counter()
             state["browser"].act(action, page, text=text)
+            act_ms = _ms_since(act_started)
             self.pending_text = None
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
             # Record execution before observing. A stale post-action observation must not erase the action.
@@ -165,14 +178,17 @@ class Agent:
                     "usage": decision["usage"],
                     "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
                     "elapsed_ms": state["elapsed_ms"],
+                    "act_ms": act_ms,
                 }
             )
+            observe_started = time.perf_counter()
             state["page"] = state["browser"].observe(screenshot=self.screenshots)
             state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
             state["history"][-1].update(
                 page_changed=state["page"]["fingerprint"] != page["fingerprint"],
                 url=state["page"]["url"],
                 elapsed_ms=state["elapsed_ms"],
+                observe_ms=_ms_since(observe_started),
             )
             if state["record"]:
                 (self.record_dir / f"{state['elapsed_ms']:06d}.jpg").write_bytes(
@@ -197,11 +213,13 @@ class Agent:
             state["status"] = "blocked"
             raise ValueError(f"Stopped at the {MAX_STEPS}-action demo budget")
         tool = decision["tool"]
+        act_started = time.perf_counter()
         try:
             ran = run_tool(state["browser"], tool["operation"], tool["arg"], templates=tool.get("templates", ()))
         except ValueError as exc:
             log.warning("tool rejected: %s", exc)
             ran = False
+        act_ms = _ms_since(act_started)
         state["history"].append({
             "step": len(state["history"]) + 1, "action": tool["arg"], "kind": "tool", "choice": "TOOL",
             "probability": 1.0, "confidence": decision["confidence"], "latency_ms": decision["latency_ms"],
@@ -209,11 +227,13 @@ class Agent:
             "target": None, "tool_ok": ran, "page_changed": False, "url": page["url"], "url_before": page["url"],
             "route": decision.get("route"), "instruction": decision.get("instruction"),
             "usage": {}, "executed_ms": round((time.perf_counter() - state["started_at"]) * 1000),
+            "act_ms": act_ms, "observe_ms": 0,
         })
         if ran:
+            observe_started = time.perf_counter()
             state["page"] = state["browser"].observe(screenshot=self.screenshots)
             state["history"][-1].update(page_changed=state["page"]["fingerprint"] != page["fingerprint"],
-                                        url=state["page"]["url"])
+                                        url=state["page"]["url"], observe_ms=_ms_since(observe_started))
         state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
         state["history"][-1]["elapsed_ms"] = state["elapsed_ms"]
         state["status"] = "blocked" if _blocked_by_repeated_no_change(state["history"]) else "ready"

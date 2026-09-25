@@ -1,6 +1,7 @@
 """Live evaluation: run tasks on real public pages with the local stack and record every step for hand labelling.
 
-Needs: a throwaway Chrome on BU_CDP_URL, the mlx-lm server from .env.example, POLICY_BACKEND=laya.
+Needs: a throwaway Chrome on BU_CDP_URL, the mlx-lm server from .env.example, and POLICY_BACKEND (program, planner
+or laya).
 Read-only public sites only. Usage: uv run --env-file .env python scripts/live_eval.py [task ...]
 """
 
@@ -18,6 +19,18 @@ MAX_STEPS = 12
 OUT = Path("artifacts/live")
 
 
+def pilot_fields(pilot) -> dict:
+    """What the run cost in model calls. A program-backend pilot also leaves its program and decision trace."""
+    if pilot is None:
+        return {"planner_calls": [], "llm_calls": 0}
+    plans = list(pilot.plans)
+    fields = {"planner_calls": plans, "llm_calls": sum(p.get("attempts", 1) for p in plans)}
+    if hasattr(pilot, "trace"):
+        fields.update(program=plans[0].get("program", "") if plans else "", trace=list(pilot.trace),
+                      actor_calls=pilot.actor_calls)
+    return fields
+
+
 def run(name: str, task: LiveTask, out: Path) -> dict:
     error = None
     started = time.perf_counter()
@@ -26,7 +39,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                          "via_url_regex": task.via_url_regex, "min_scroll_y": task.min_scroll_y,
                          "flight_date": task.flight_date, "flight_origin_regex": task.flight_origin_regex,
                          "flight_destination_regex": task.flight_destination_regex},
-              "backend": os.environ.get("POLICY_BACKEND", ""), "planner_calls": [],
+              "backend": os.environ.get("POLICY_BACKEND", ""), "planner_calls": [], "llm_calls": 0,
               "status": "error", "error": None,
               "seconds": None, "verdicts": [], "steps": [], "decisions": [], "success": False}
     try:
@@ -63,6 +76,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                                         else state["history"][i - 1]["url"]),
                          "url_after": h.get("url"),
                          "route": h.get("route"), "instruction": h.get("instruction"),
+                         "observe_ms": h.get("observe_ms"), "act_ms": h.get("act_ms"),
                          "correct": None, "failure_tag": None}
                         for i, h in enumerate(state["history"])
                     ],
@@ -74,7 +88,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                                 "route": d.get("route"), "instruction": d.get("instruction"),
                                 "value": d.get("value"), "tool": d.get("tool"), "actor_ms": d.get("actor_ms")}
                                for d in state["decisions"]],
-                    planner_calls=list(agent.pilot.plans) if getattr(agent, 'pilot', None) else [],
+                    **pilot_fields(getattr(agent, "pilot", None)),
                 )
     except Exception as exc:  # noqa: BLE001 - a live run must always leave its record behind
         error = f"{type(exc).__name__}: {exc}"
