@@ -374,7 +374,7 @@ def test_tool_decision_runs_the_tool_and_is_recorded(runner, monkeypatch):
                                 "tool": {"operation": "SCROLL_TO_TEXT", "arg": "External links"},
                                 "probabilities": {"TOOL": 1.0}}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
-    run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links")
+    run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links", templates=())
     entry = runner.state["history"][-1]
     assert (entry["kind"], entry["operation"], entry["action"]) == ("tool", "SCROLL_TO_TEXT", "External links")
     assert entry["tool_ok"] is True
