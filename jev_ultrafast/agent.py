@@ -48,7 +48,7 @@ class Agent:
         try:
             if backend == "program":
                 # The only LLM call of the run (none when the goal's program is cached).
-                self.pilot = Controller.from_goal(task, discover=lambda page_url: discover(self.browser, page_url),
+                self.pilot = Controller.from_goal(task, discover=lambda page: discover(self.browser, page),
                                                   templates=default_templates())
             page = self.browser.observe(screenshot=self.screenshots)
         except Exception:

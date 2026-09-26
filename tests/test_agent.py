@@ -488,7 +488,9 @@ def test_program_backend_creates_a_controller(monkeypatch):
     assert loop.Controller.from_goal.call_args.args[0] == "Find a book"
     discover = loop.Controller.from_goal.call_args.kwargs["discover"]
     browser.evaluate = Mock(return_value=None)
-    assert discover("https://example.test/") is None and browser.evaluate.called
+    assert discover({"url": "https://example.test/", "opensearch": ""}) is None and not browser.evaluate.called
+    assert discover({"url": "https://example.test/", "opensearch": "https://example.test/osd.xml"}) is None
+    assert browser.evaluate.called
 
 
 def test_history_records_observe_and_act_timings(runner):

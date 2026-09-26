@@ -49,8 +49,10 @@ def controller(text, **kw):
 
 
 def test_find_via_discovered_template_then_done_when_the_page_is_about_it():
-    c = controller("FIND Ada Lovelace", discover=Mock(return_value=T))
+    discover = Mock(return_value=T)
+    c = controller("FIND Ada Lovelace", discover=discover)
     d = c.decide(page(), [])
+    assert discover.call_args.args[0]["url"] == HOME
     assert (d["choice"], d["tool"]["operation"], d["route"]) == ("TOOL", "GOTO", "tactic")
     assert d["tool"]["templates"] == [T]
     history = [entry(d["tool"]["arg"], op="GOTO", kind="tool", after=ADA, tool_ok=True)]

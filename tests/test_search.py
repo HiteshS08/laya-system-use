@@ -85,10 +85,23 @@ def test_store_persists_by_host(tmp_path):
     assert SearchTemplates().get(WIKI) is None
 
 
+OSD_HREF = "https://en.wikipedia.org/w/rest.php/v1/search"
+
+
 def test_discover_reads_the_pages_own_description():
-    assert discover(Mock(evaluate=Mock(return_value=OSD)), WIKI) == T
-    assert discover(Mock(evaluate=Mock(return_value=None)), WIKI) is None
-    assert discover(Mock(evaluate=Mock(side_effect=RuntimeError("gone"))), WIKI) is None
+    browser = Mock(evaluate=Mock(return_value=OSD))
+    assert discover(browser, {"url": WIKI, "opensearch": OSD_HREF}) == T
+    assert OSD_HREF in browser.evaluate.call_args.args[0]
+    assert discover(Mock(evaluate=Mock(return_value=None)), {"url": WIKI, "opensearch": OSD_HREF}) is None
+    gone = Mock(evaluate=Mock(side_effect=RuntimeError("gone")))
+    assert discover(gone, {"url": WIKI, "opensearch": OSD_HREF}) is None
+
+
+def test_discover_skips_the_page_query_without_a_same_host_description_link():
+    for href in ("", "https://evil.test/osd.xml", "javascript:alert(1)", None):
+        browser = Mock(evaluate=Mock(return_value=OSD))
+        assert discover(browser, {"url": WIKI, "opensearch": href}) is None
+        assert not browser.evaluate.called
 
 
 def test_template_store_writes_are_atomic(tmp_path, monkeypatch):

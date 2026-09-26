@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import quote_plus, unquote_plus, urlsplit
 
@@ -13,16 +14,15 @@ log = logging.getLogger("search")
 _OPTIONAL = re.compile(r"^\{[^}]+\?\}$")
 _PLACEHOLDER = re.compile(r"\{[^}]*\}")
 
-# Fetches the page's own OpenSearch description (same origin; cross-origin fetches fail under CORS and return null).
-OPENSEARCH_JS = """(async () => {
-  const link=document.querySelector('link[rel="search"][type="application/opensearchdescription+xml"]');
-  if (!link) return null;
+# Fetches the page's own OpenSearch description, whose link snapshot.js already collected (page["opensearch"]).
+# Same origin only; cross-origin fetches fail under CORS and return null.
+_FETCH_JS = """(async href => {
   const ctrl=new AbortController(), timer=setTimeout(()=>ctrl.abort(),3000);
   try {
-    const r=await fetch(link.href,{signal:ctrl.signal,credentials:'omit'});
+    const r=await fetch(href,{signal:ctrl.signal,credentials:'omit'});
     return r.ok ? (await r.text()).slice(0,20000) : null;
   } catch (e) { return null; } finally { clearTimeout(timer); }
-})()"""
+})(%s)"""
 
 
 def _host(url: str) -> str:
@@ -147,9 +147,14 @@ def default_templates() -> SearchTemplates:
     return SearchTemplates(cache_dir() / "search_templates.json")
 
 
-def discover(browser, page_url: str) -> str | None:
+def discover(browser, page: Mapping) -> str | None:
+    """The page's OpenSearch template; no page query unless the snapshot saw a same-host description link."""
+    href, page_url = page.get("opensearch") or "", page["url"]
+    host = _web_host(href)
+    if not host or host != _web_host(page_url):
+        return None
     try:
-        xml_text = browser.evaluate(OPENSEARCH_JS, await_promise=True)
+        xml_text = browser.evaluate(_FETCH_JS % json.dumps(href), await_promise=True)
     except (RuntimeError, ValueError) as exc:
         log.info("no OpenSearch description on %s: %s", page_url, exc)
         return None

@@ -83,12 +83,12 @@ def _evidence(sub: Subgoal, page: Mapping) -> str:
 class Controller:
     def __init__(self, goal: str, program: Program, *, compile_meta: Mapping | None = None,
                  predict: Callable | None = None, fallback: Callable | None = None,
-                 discover: Callable[[str], str | None] | None = None,
+                 discover: Callable[[Mapping], str | None] | None = None,
                  templates: SearchTemplates | None = None) -> None:
         self.goal, self.program = goal, program
         self._predict = predict or policy.laya_predict
         self._fallback = fallback or policy.decide
-        self._discover = discover or (lambda url: None)
+        self._discover = discover or (lambda page: None)
         self._templates = templates if templates is not None else SearchTemplates()
         self.plans: list[dict] = [{"program": render_program(program), "source": program.source,
                                    **(compile_meta or {})}]
@@ -126,7 +126,7 @@ class Controller:
                               started)
         here = _document(page["url"])
         usable = [e for e in elements if (here, normalize(e["label"])) not in self._excluded]
-        template = self._template(page["url"]) if sub.kind == "FIND" else None
+        template = self._template(page) if sub.kind == "FIND" else None
         step = next_step(sub, page, usable, p, template)
         if step is None:
             return self._stop("BLOCKED", f"{sub.kind} {sub.target}: no step left on this page", started)
@@ -188,12 +188,13 @@ class Controller:
             return self._stop("DONE", _evidence(last, page), started)
         return None
 
-    def _template(self, url: str) -> str | None:
+    def _template(self, page: Mapping) -> str | None:
+        url = page["url"]
         template = self._templates.get(url)
         host = urlsplit(url).hostname or ""
         if template is None and host not in self._asked_hosts:
             self._asked_hosts.add(host)
-            template = self._discover(url)
+            template = self._discover(page)
             if template:
                 self._templates.put(url, template)
         return template
