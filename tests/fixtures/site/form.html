@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><title>Trips - Fixture</title></head>
+<body>
+  <main>
+    <h1>Find a trip</h1>
+    <input id="to" role="combobox" aria-label="Where to?" aria-controls="suggestions" aria-autocomplete="list">
+    <ul id="suggestions" role="listbox"></ul>
+    <button type="button" id="go">Search</button>
+  </main>
+  <script>
+    const to = document.getElementById("to"), list = document.getElementById("suggestions");
+    const cities = ["London, United Kingdom", "Londrina, Brazil", "Paris, France"];
+    to.addEventListener("input", () => {
+      list.innerHTML = "";
+      const q = to.value.toLowerCase().slice(0, 4);
+      if (!q) return;
+      for (const city of cities) {
+        if (!city.toLowerCase().startsWith(q)) continue;
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.textContent = city;
+        li.addEventListener("click", () => { to.value = city; list.innerHTML = ""; });
+        list.appendChild(li);
+      }
+    });
+    document.getElementById("go").addEventListener("click", () => {
+      if (to.value === "London, United Kingdom") location.href = "done.html";
+    });
+  </script>
+</body></html>

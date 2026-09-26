@@ -135,6 +135,18 @@ node --check jev_ultrafast/snapshot.js
 uv build
 ```
 
+**Required before merge / release:** the end-to-end fixture tests need a real Chrome and are skipped without one,
+so a plain `uv run pytest` does not run them. Run them against a throwaway headless Chrome (never your own):
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9333 \
+  --user-data-dir="$(mktemp -d)" --headless=new about:blank >/dev/null 2>&1 &
+BU_CDP_URL=http://127.0.0.1:9333 uv run pytest tests/test_e2e_fixture.py tests/test_snapshot_live.py -q
+kill %1
+```
+
+Both files must pass with no skips.
+
 Tests are offline. `uv run python scripts/check_guards.py` checks real controls in a local browser without model calls. Live examples and recording scripts make paid API calls. `scripts/record_flights.py <new-folder>` captures original browser timestamps; `scripts/render_demo.py <recording-folder>` renders that verified run at 1× and crops out the Google account strip. Credentials and raw traces stay ignored.
 
 ---

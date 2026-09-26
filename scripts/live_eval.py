@@ -1,10 +1,12 @@
 """Live evaluation: run tasks on real public pages with the local stack and record every step for hand labelling.
 
-Needs: a throwaway Chrome on BU_CDP_URL, the mlx-lm server from .env.example, POLICY_BACKEND=laya.
+Needs: a throwaway Chrome on BU_CDP_URL, the mlx-lm server from .env.example, and POLICY_BACKEND (program, planner
+or laya).
 Read-only public sites only. Usage: uv run --env-file .env python scripts/live_eval.py [task ...]
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -14,8 +16,44 @@ from pathlib import Path
 from evals.live_tasks import TASKS, LiveTask, check_outcome
 from jev_ultrafast import Agent
 
+log = logging.getLogger("live_eval")
+
 MAX_STEPS = 12
 OUT = Path("artifacts/live")
+
+
+def _jsonable(obj):
+    """json.dumps default hook: a step's roles (jev_ultrafast.tactics.Step) survive asdict() as a
+    set/frozenset, which json can't serialise on its own. Sort by str so mixed-type sets stay deterministic."""
+    if isinstance(obj, (set, frozenset)):
+        return sorted(obj, key=str)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def write_record(record: dict, out: Path, name: str) -> None:
+    """Write a task's record to disk. This runs outside the per-task try/except in run(), so a record that
+    still can't be serialised (an unforeseen type _jsonable doesn't cover) must never take the rest of the
+    suite down with it: log the failure and write a minimal record carrying the error instead."""
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.json"
+    try:
+        path.write_text(json.dumps(record, indent=2, ensure_ascii=False, default=_jsonable))
+    except (TypeError, ValueError) as exc:
+        log.error("could not serialise record for task %r: %s", name, exc)
+        minimal = {"task": name, "status": "error", "error": f"record serialisation failed: {exc}"}
+        path.write_text(json.dumps(minimal, indent=2, ensure_ascii=False))
+
+
+def pilot_fields(pilot) -> dict:
+    """What the run cost in model calls. A program-backend pilot also leaves its program and decision trace."""
+    if pilot is None:
+        return {"planner_calls": [], "llm_calls": 0}
+    plans = list(pilot.plans)
+    fields = {"planner_calls": plans, "llm_calls": sum(p.get("attempts", 1) for p in plans)}
+    if hasattr(pilot, "trace"):
+        fields.update(program=plans[0].get("program", "") if plans else "", trace=list(pilot.trace),
+                      actor_calls=pilot.actor_calls)
+    return fields
 
 
 def run(name: str, task: LiveTask, out: Path) -> dict:
@@ -26,7 +64,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                          "via_url_regex": task.via_url_regex, "min_scroll_y": task.min_scroll_y,
                          "flight_date": task.flight_date, "flight_origin_regex": task.flight_origin_regex,
                          "flight_destination_regex": task.flight_destination_regex},
-              "backend": os.environ.get("POLICY_BACKEND", ""), "planner_calls": [],
+              "backend": os.environ.get("POLICY_BACKEND", ""), "planner_calls": [], "llm_calls": 0,
               "status": "error", "error": None,
               "seconds": None, "verdicts": [], "steps": [], "decisions": [], "success": False}
     try:
@@ -63,6 +101,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                                         else state["history"][i - 1]["url"]),
                          "url_after": h.get("url"),
                          "route": h.get("route"), "instruction": h.get("instruction"),
+                         "observe_ms": h.get("observe_ms"), "act_ms": h.get("act_ms"),
                          "correct": None, "failure_tag": None}
                         for i, h in enumerate(state["history"])
                     ],
@@ -74,14 +113,13 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
                                 "route": d.get("route"), "instruction": d.get("instruction"),
                                 "value": d.get("value"), "tool": d.get("tool"), "actor_ms": d.get("actor_ms")}
                                for d in state["decisions"]],
-                    planner_calls=list(agent.pilot.plans) if getattr(agent, 'pilot', None) else [],
+                    **pilot_fields(getattr(agent, "pilot", None)),
                 )
     except Exception as exc:  # noqa: BLE001 - a live run must always leave its record behind
         error = f"{type(exc).__name__}: {exc}"
     record["error"] = error
     record["seconds"] = round(time.perf_counter() - started, 1)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / f"{name}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False))
+    write_record(record, out, name)
     return record
 
 

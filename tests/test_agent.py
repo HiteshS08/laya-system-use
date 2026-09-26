@@ -374,7 +374,7 @@ def test_tool_decision_runs_the_tool_and_is_recorded(runner, monkeypatch):
                                 "tool": {"operation": "SCROLL_TO_TEXT", "arg": "External links"},
                                 "probabilities": {"TOOL": 1.0}}
     runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
-    run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links")
+    run_tool.assert_called_once_with(runner.state["browser"], "SCROLL_TO_TEXT", "External links", templates=())
     entry = runner.state["history"][-1]
     assert (entry["kind"], entry["operation"], entry["action"]) == ("tool", "SCROLL_TO_TEXT", "External links")
     assert entry["tool_ok"] is True
@@ -465,3 +465,44 @@ def test_link_click_tolerates_context_loss_while_waiting(monkeypatch):
     monkeypatch.setattr(b.time, "sleep", Mock())
     br.observe(screenshot=False)
     assert br.evaluate.call_count == 1
+
+
+def test_tool_templates_reach_run_tool(runner, monkeypatch):
+    run_tool = Mock(return_value=True)
+    monkeypatch.setattr(loop, "run_tool", run_tool)
+    runner.state["decision"] = {**decision("TOOL"), "operation": "GOTO", "route": "tactic",
+                                "tool": {"operation": "GOTO", "arg": "https://ex.test/?q=a",
+                                         "templates": ["https://ex.test/?q={q}"]}, "probabilities": {"TOOL": 1.0}}
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    assert run_tool.call_args.kwargs["templates"] == ["https://ex.test/?q={q}"]
+
+
+def test_program_backend_creates_a_controller(monkeypatch):
+    monkeypatch.setenv("POLICY_BACKEND", "program")
+    browser = Mock(observe=Mock(return_value=page()))
+    monkeypatch.setattr(loop, "Browser", Mock(return_value=browser))
+    made = Mock()
+    monkeypatch.setattr(loop.Controller, "from_goal", Mock(return_value=made))
+    agent = loop.Agent("https://example.test/", "Find a book")
+    assert agent.pilot is made
+    assert loop.Controller.from_goal.call_args.args[0] == "Find a book"
+    discover = loop.Controller.from_goal.call_args.kwargs["discover"]
+    browser.evaluate = Mock(return_value=None)
+    assert discover({"url": "https://example.test/", "opensearch": ""}) is None and not browser.evaluate.called
+    assert discover({"url": "https://example.test/", "opensearch": "https://example.test/osd.xml"}) is None
+    assert browser.evaluate.called
+
+
+def test_history_records_observe_and_act_timings(runner):
+    runner.state["decision"] = decision("e3")
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    entry = runner.state["history"][-1]
+    assert isinstance(entry["observe_ms"], int) and isinstance(entry["act_ms"], int)
+
+
+def test_tool_history_records_timings(runner, monkeypatch):
+    monkeypatch.setattr(loop, "run_tool", Mock(return_value=True))
+    runner.state["decision"] = tool_decision()
+    runner.command("act", {"fingerprint": runner.state["page"]["fingerprint"]})
+    entry = runner.state["history"][-1]
+    assert isinstance(entry["observe_ms"], int) and isinstance(entry["act_ms"], int)

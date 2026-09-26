@@ -63,3 +63,12 @@ def test_offscreen_target_is_scrolled_into_view_and_clicked(observed):
     target = by_label(page, "Official archive")
     browser.act(target, page)
     assert browser.evaluate("location.hash") == "#archive"
+
+
+def test_headings_and_opensearch_link(observed):
+    _, page = observed
+    headings = {h["text"]: h for h in page["headings"]}
+    assert headings["From today's featured article"]["in_viewport"] is True
+    assert headings["External links"]["in_viewport"] is False and headings["External links"]["id"] == "External_links"
+    assert headings["External links"]["level"] == 2
+    assert page["opensearch"].endswith("/opensearch.xml")

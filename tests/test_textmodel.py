@@ -84,3 +84,17 @@ def test_extra_fields_are_merged_into_the_request(monkeypatch):
     textmodel.complete_json("sys", "user", extra={"chat_template_kwargs": {"enable_thinking": False}})
     body = post.call_args.args[2]
     assert body["chat_template_kwargs"] == {"enable_thinking": False} and body["temperature"] == 0
+
+
+def test_complete_text_returns_plain_content(monkeypatch):
+    monkeypatch.setattr(model, "post_json", Mock(return_value=reply("<think>x</think>\nFIND Ada\n")))
+    text, meta = textmodel.complete_text("sys", "user", max_tokens=32)
+    assert text == "FIND Ada" and meta["usage"] == {"total_tokens": 5} and meta["attempts"] == 1
+
+
+def test_complete_text_uses_the_compiler_model_when_set(monkeypatch):
+    post = Mock(return_value=reply("FIND Ada"))
+    monkeypatch.setattr(model, "post_json", post)
+    monkeypatch.setenv("COMPILER_MODEL", "small-model")
+    _, meta = textmodel.complete_text("sys", "user")
+    assert post.call_args.args[2]["model"] == "small-model" and meta["model"] == "small-model"
