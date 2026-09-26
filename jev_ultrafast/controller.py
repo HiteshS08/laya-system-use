@@ -70,13 +70,15 @@ def _document(url: str) -> str:
     return urldefrag(url)[0]
 
 
-def _evidence(sub: Subgoal, page: Mapping) -> str:
+def _evidence(sub: Subgoal, page: Mapping, progress: Progress | None = None) -> str:
     if sub.kind == "FIND":
         return f'title shows "{title_subject(page.get("title", ""))}"'
     if sub.kind in ("JUMP", "SCROLL") and fragment_names(page["url"], sub.target):
         return f"url fragment #{urldefrag(page['url'])[1]}"
     if sub.kind in ("JUMP", "SCROLL") and heading_in_view(page, sub.target):
         return f'heading "{sub.target}" in view'
+    if sub.kind in ("JUMP", "SCROLL") and progress is not None and progress.scrolled:
+        return f'scrolled to "{sub.target}"'
     return f"{sub.kind} {sub.target}".strip() + " done"
 
 
@@ -172,16 +174,16 @@ class Controller:
         return sub.kind != "DO" and p.acted
 
     def _advance(self, page: Mapping, elements: Sequence[Mapping], started: float) -> dict | None:
-        subgoals = self.program.subgoals
+        subgoals, evidence = self.program.subgoals, ""
         if self.program.done_text and text_shown(page, self.program.done_text):
             return self._stop("DONE", f'page shows "{self.program.done_text}"', started)
         while self._current < len(subgoals) and self._complete(subgoals[self._current], page, elements):
-            log.info("subgoal %d done: %s %s", self._current, subgoals[self._current].kind,
-                     subgoals[self._current].target)
+            evidence = _evidence(subgoals[self._current], page, self._progress)
+            log.info("subgoal %d done: %s", self._current, evidence)
             self._current += 1
             self._progress, self._excluded, self._start_url = Progress(), set(), page["url"]
         if self._current >= len(subgoals):
-            return self._stop("DONE", _evidence(subgoals[-1], page), started)
+            return self._stop("DONE", evidence or _evidence(subgoals[-1], page), started)
         last = subgoals[-1]
         # Only the current subgoal may finish the run early; a later one being true now skips nothing.
         if self._current == len(subgoals) - 1 and last.kind in PAGE_KINDS and satisfied(last, page, page["url"]):

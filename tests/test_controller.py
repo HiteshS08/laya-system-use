@@ -168,7 +168,8 @@ def test_scroll_completes_once_the_tool_found_the_text():
     d = c.decide(page(), [])
     assert d["tool"] == {"operation": "SCROLL_TO_TEXT", "arg": "External links", "templates": []}
     h = [entry("External links", op="SCROLL_TO_TEXT", kind="tool", changed=True, tool_ok=True)]
-    assert c.decide(page(), h)["choice"] == "DONE"
+    d = c.decide(page(), h)
+    assert (d["choice"], d["evidence"]) == ("DONE", 'scrolled to "External links"')
 
 
 def test_unexecuted_decision_is_not_counted_as_progress():
