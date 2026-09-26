@@ -53,18 +53,51 @@ def template_from_opensearch(xml_text: str, page_url: str) -> str | None:
     return None
 
 
-def learn_template(url: str, query: str) -> str | None:
+_TOKEN_NAME = re.compile(r"sid|session|token|csrf|auth|key|sig", re.IGNORECASE)
+_OPAQUE_VALUE = re.compile(r"[A-Za-z0-9_\-]{32,}")
+_TRACKING = re.compile(r"utm_[a-z]+|fbclid|gclid|msclkid", re.IGNORECASE)
+
+
+def _web_host(url: str) -> str:
+    """The host of a plain http(s) URL without credentials; "" for anything else."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or "@" in parts.netloc:
+        return ""
+    return parts.hostname or ""
+
+
+def _safe_pairs(raw_pairs: list[str], hit: list[bool]) -> list[str] | None:
+    """Pairs to keep in a stored template, tracking parameters dropped; None if any looks like a credential."""
+    kept = []
+    for pair, is_query in zip(raw_pairs, hit, strict=True):
+        name, _, value = pair.partition("=")
+        if is_query:
+            kept.append(f"{name}={{q}}")
+        elif _TOKEN_NAME.search(unquote_plus(name)) or _OPAQUE_VALUE.fullmatch(unquote_plus(value)):
+            return None
+        elif not _TRACKING.fullmatch(name):
+            kept.append(pair)
+    return kept
+
+
+def learn_template(url: str, query: str, url_before: str) -> str | None:
     """The URL a typed search landed on, with the query's value replaced by {q}; None if the query is not in it.
 
-    Other parameters keep their original encoding, so the template renders exactly the URL the site produced.
+    Templates persist and are replayed later, so only same-host http(s) landings without credential-like
+    parameters are learned. Other parameters keep their original encoding.
     """
+    host = _web_host(url)
+    if not host or host != _web_host(url_before):
+        return None
     parts = urlsplit(url)
     want = normalize(query)
     raw_pairs = [p for p in parts.query.split("&") if p]
     hit = [normalize(unquote_plus(p.partition("=")[2])) == want for p in raw_pairs]
     if not want or not any(hit):
         return None
-    pairs = [f"{p.partition('=')[0]}={{q}}" if h else p for p, h in zip(raw_pairs, hit, strict=True)]
+    pairs = _safe_pairs(raw_pairs, hit)
+    if pairs is None:
+        return None
     return f"{parts.scheme}://{parts.netloc}{parts.path}?{'&'.join(pairs)}"
 
 

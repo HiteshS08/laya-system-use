@@ -155,7 +155,8 @@ class Controller:
             return
         self._progress = replace(p, actions=p.actions + 1, **_effects(pending.step))
         if pending.step.purpose in ("search", "submit") and pending.step.operation != "TYPE_TEXT":
-            template = learn_template(entry.get("url") or "", self.program.subgoals[self._current].target)
+            template = learn_template(entry.get("url") or "", self.program.subgoals[self._current].target,
+                                      entry.get("url_before") or "")
             if template:
                 self._templates.put(entry["url"], template)
 

@@ -74,6 +74,18 @@ def test_find_via_search_box_learns_the_template():
     assert d3["route"] == "actor" and d3["instruction"] == "Click the search result for Ada Lovelace."
 
 
+def test_a_search_landing_on_another_host_is_not_learned():
+    templates = SearchTemplates()
+    c = controller("FIND Ada Lovelace", templates=templates, predict=ranked("5"))
+    c.decide(page(), [])
+    h = [entry("Search Wikipedia", op="TYPE_TEXT", kind="fill", role="searchbox", changed=False, text="Ada Lovelace")]
+    c.decide(page(), h)
+    elsewhere = "https://victim.test/find?search=Ada+Lovelace"
+    h.append(entry("", op="SUBMIT", kind="tool", after=elsewhere, tool_ok=True))
+    c.decide(page(url=elsewhere, title="Search results"), h)
+    assert templates.get(HOME) is None and templates.get(elsewhere) is None
+
+
 def test_actor_grounds_descriptions_and_a_no_effect_element_is_excluded():
     predict = ranked("3", "4")
     c = controller("OPEN Issues tab", predict=predict)

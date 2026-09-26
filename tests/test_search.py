@@ -30,10 +30,36 @@ def test_opensearch_with_another_required_placeholder_is_ignored():
     assert template_from_opensearch(osd, WIKI) is None
 
 
+EX = "https://ex.test/"
+
+
 def test_learn_template_from_an_observed_search():
-    assert learn_template("https://ex.test/find?q=ada+lovelace&lang=en", "Ada Lovelace") == \
+    assert learn_template("https://ex.test/find?q=ada+lovelace&lang=en", "Ada Lovelace", EX) == \
         "https://ex.test/find?q={q}&lang=en"
-    assert learn_template("https://ex.test/wiki/Ada_Lovelace", "Ada Lovelace") is None
+    assert learn_template("https://ex.test/wiki/Ada_Lovelace", "Ada Lovelace", EX) is None
+
+
+def test_learn_template_refuses_a_landing_on_another_host():
+    assert learn_template("https://victim.test/find?q=ada", "ada", EX) is None
+    assert learn_template("https://ex.test.evil.test/find?q=ada", "ada", EX) is None
+
+
+def test_learn_template_refuses_token_like_parameters():
+    for name in ("sid", "SessionId", "token", "csrf_token", "auth", "api_key", "sig"):
+        assert learn_template(f"https://ex.test/find?q=ada&{name}=abc", "ada", EX) is None, name
+    long_value = "a1B2" * 10
+    assert learn_template(f"https://ex.test/find?q=ada&v={long_value}", "ada", EX) is None
+
+
+def test_learn_template_needs_http_and_a_host():
+    assert learn_template("javascript:x?q=ada", "ada", "javascript:y") is None
+    assert learn_template("file:///find?q=ada", "ada", "file:///") is None
+    assert learn_template("https://u:p@ex.test/find?q=ada", "ada", EX) is None
+
+
+def test_learn_template_drops_tracking_parameters():
+    assert learn_template("https://ex.test/find?q=ada&utm_source=x&fbclid=y", "ada", EX) == \
+        "https://ex.test/find?q={q}"
 
 
 def test_render_and_match_are_host_bound():
