@@ -6,6 +6,7 @@ Read-only public sites only. Usage: uv run --env-file .env python scripts/live_e
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -15,8 +16,32 @@ from pathlib import Path
 from evals.live_tasks import TASKS, LiveTask, check_outcome
 from jev_ultrafast import Agent
 
+log = logging.getLogger("live_eval")
+
 MAX_STEPS = 12
 OUT = Path("artifacts/live")
+
+
+def _jsonable(obj):
+    """json.dumps default hook: a step's roles (jev_ultrafast.tactics.Step) survive asdict() as a
+    set/frozenset, which json can't serialise on its own. Sort by str so mixed-type sets stay deterministic."""
+    if isinstance(obj, (set, frozenset)):
+        return sorted(obj, key=str)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def write_record(record: dict, out: Path, name: str) -> None:
+    """Write a task's record to disk. This runs outside the per-task try/except in run(), so a record that
+    still can't be serialised (an unforeseen type _jsonable doesn't cover) must never take the rest of the
+    suite down with it: log the failure and write a minimal record carrying the error instead."""
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"{name}.json"
+    try:
+        path.write_text(json.dumps(record, indent=2, ensure_ascii=False, default=_jsonable))
+    except (TypeError, ValueError) as exc:
+        log.error("could not serialise record for task %r: %s", name, exc)
+        minimal = {"task": name, "status": "error", "error": f"record serialisation failed: {exc}"}
+        path.write_text(json.dumps(minimal, indent=2, ensure_ascii=False))
 
 
 def pilot_fields(pilot) -> dict:
@@ -94,8 +119,7 @@ def run(name: str, task: LiveTask, out: Path) -> dict:
         error = f"{type(exc).__name__}: {exc}"
     record["error"] = error
     record["seconds"] = round(time.perf_counter() - started, 1)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / f"{name}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False))
+    write_record(record, out, name)
     return record
 
 
