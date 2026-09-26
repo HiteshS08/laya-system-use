@@ -154,6 +154,13 @@ def test_done_text_and_an_already_satisfied_goal_stop_at_once():
     assert c.decide(page(url=ADA, title="Ada Lovelace - Wikipedia"), [])["choice"] == "DONE"
 
 
+def test_a_satisfied_last_subgoal_does_not_skip_earlier_ones():
+    history_heading = [{"text": "History", "in_viewport": True}]
+    c = controller("FIND Ada Lovelace\nJUMP History")
+    d = c.decide(page(headings=history_heading), [])
+    assert d["choice"] != "DONE" and d["value"] == "Ada Lovelace"
+
+
 def test_scroll_completes_once_the_tool_found_the_text():
     c = controller("SCROLL External links")
     d = c.decide(page(), [])

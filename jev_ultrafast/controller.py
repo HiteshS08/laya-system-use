@@ -183,7 +183,8 @@ class Controller:
         if self._current >= len(subgoals):
             return self._stop("DONE", _evidence(subgoals[-1], page), started)
         last = subgoals[-1]
-        if last.kind in PAGE_KINDS and satisfied(last, page, page["url"]):
+        # Only the current subgoal may finish the run early; a later one being true now skips nothing.
+        if self._current == len(subgoals) - 1 and last.kind in PAGE_KINDS and satisfied(last, page, page["url"]):
             return self._stop("DONE", _evidence(last, page), started)
         return None
 
