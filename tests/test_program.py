@@ -49,3 +49,18 @@ def test_other_steps_after_find_are_kept():
     assert render_program(program) == text
     twice = parse_program("OPEN Ada\nOPEN Ada")
     assert drop_redundant_opens(twice) == twice
+
+
+def test_goal_mode_programs_round_trip():
+    goal = "Book a table for two at a quiet Italian place near the station on Friday evening, " * 2
+    program = fallback_program(goal.strip())
+    assert parse_program(render_program(program), goal_mode=True) == program
+    with pytest.raises(ValueError):
+        parse_program(render_program(program))
+
+
+def test_do_must_be_the_only_step():
+    with pytest.raises(ValueError):
+        parse_program("DO something\nOPEN Pricing", goal_mode=True)
+    with pytest.raises(ValueError):
+        parse_program("DO", goal_mode=True)

@@ -11,7 +11,9 @@ MAX_SUBGOALS = 8
 MAX_TARGET_CHARS = 80
 MAX_VALUE_CHARS = 200
 MAX_ORDINAL = 50
+MAX_GOAL_CHARS = 2000
 DONE_WHEN = "DONE_WHEN"
+GOAL_MODE = "DO"  # not in the compiler's grammar: the whole raw goal, run in goal mode (see fallback_program)
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"```[A-Za-z]*")
@@ -69,8 +71,24 @@ def _subgoal(line: str) -> Subgoal:
                    ordinal)
 
 
-def parse_program(text: str) -> Program:
+def _goal_mode(lines: list[str]) -> Program | None:
+    """A rendered fallback program ("DO <goal>") parses back to itself; DO never mixes with other steps."""
+    kinds = [line.partition(" ")[0].upper() for line in lines]
+    if GOAL_MODE not in kinds:
+        return None
+    goal = lines[0].partition(" ")[2].strip() if len(lines) == 1 else ""
+    if not goal:
+        raise ValueError("DO takes the whole goal and must be the only step")
+    return fallback_program(_checked(goal, MAX_GOAL_CHARS, "goal"))
+
+
+def parse_program(text: str, *, goal_mode: bool = False) -> Program:
+    """Compiler output never contains DO (it stays an unknown step); goal_mode=True also reads back a rendered
+    fallback program, so render_program -> parse_program round-trips for every program."""
     lines = _lines(text)
+    fallback = _goal_mode(lines) if goal_mode else None
+    if fallback is not None:
+        return fallback
     done_text = ""
     if lines and lines[-1].upper().startswith(DONE_WHEN):
         done_text = _checked(lines.pop()[len(DONE_WHEN):].strip(), MAX_TARGET_CHARS, "done text")
@@ -112,4 +130,4 @@ def render_program(program: Program) -> str:
 
 def fallback_program(goal: str) -> Program:
     """Goal-mode Laya on the raw goal: the baseline behaviour, used when the goal cannot be compiled."""
-    return Program((Subgoal("DO", goal),), source="fallback")
+    return Program((Subgoal(GOAL_MODE, goal),), source="fallback")
