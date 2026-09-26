@@ -87,3 +87,20 @@ def test_compiled_find_then_open_of_the_same_name_ends_at_find():
 def test_prompt_has_a_search_example_that_ends_at_find():
     blocks = [b.strip().splitlines() for b in COMPILER_SYSTEM.split("\n\n")[1:]]
     assert any(b[1].startswith("FIND ") and len(b) == 2 and "open" in b[0].lower() for b in blocks)
+
+
+def test_cache_writes_are_atomic(tmp_path, monkeypatch):
+    import os
+
+    from jev_ultrafast.program import parse_program
+
+    cache = ProgramCache(tmp_path / "p.json")
+    cache.put("Find Ada", parse_program("FIND Ada"))
+    before = (tmp_path / "p.json").read_text()
+    monkeypatch.setattr(os, "replace", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    try:
+        cache.put("Find Bob", parse_program("FIND Bob"))
+    except OSError:
+        pass
+    assert (tmp_path / "p.json").read_text() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["p.json"]

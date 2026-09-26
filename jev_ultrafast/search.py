@@ -136,8 +136,9 @@ class SearchTemplates:
         data[_host(url)] = template
         if self.path is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=1))
+        from .compiler import write_json_atomic
+
+        write_json_atomic(self.path, data)
 
 
 def default_templates() -> SearchTemplates:

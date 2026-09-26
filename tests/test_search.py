@@ -89,3 +89,18 @@ def test_discover_reads_the_pages_own_description():
     assert discover(Mock(evaluate=Mock(return_value=OSD)), WIKI) == T
     assert discover(Mock(evaluate=Mock(return_value=None)), WIKI) is None
     assert discover(Mock(evaluate=Mock(side_effect=RuntimeError("gone"))), WIKI) is None
+
+
+def test_template_store_writes_are_atomic(tmp_path, monkeypatch):
+    import os
+
+    store = SearchTemplates(tmp_path / "t.json")
+    store.put(WIKI, T)
+    before = (tmp_path / "t.json").read_text()
+    monkeypatch.setattr(os, "replace", lambda *a: (_ for _ in ()).throw(OSError("disk full")))
+    try:
+        store.put("https://ex.test/", "https://ex.test/?q={q}")
+    except OSError:
+        pass
+    assert (tmp_path / "t.json").read_text() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["t.json"]

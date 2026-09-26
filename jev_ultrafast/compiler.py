@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -50,6 +51,19 @@ CLICK Search
 DONE_WHEN hotels found"""
 
 
+def write_json_atomic(path: Path, data: dict) -> None:
+    """Write via a temp file in the same directory and os.replace, so readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1, ensure_ascii=False)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
 def cache_key(goal: str) -> str:
     """Normalized goal, prefixed by the prompt and model it was compiled with, so either change invalidates it."""
     version = hashlib.sha256(f"{compiler_model()}\n{COMPILER_SYSTEM}".encode()).hexdigest()[:12]
@@ -85,8 +99,7 @@ class ProgramCache:
     def put(self, goal: str, program: Program) -> None:
         data = self._load()
         data[cache_key(goal)] = render_program(program)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+        write_json_atomic(self.path, data)
 
 
 def cache_dir() -> Path:
