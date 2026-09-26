@@ -54,7 +54,7 @@ def template_from_opensearch(xml_text: str, page_url: str) -> str | None:
     return None
 
 
-_TOKEN_NAME = re.compile(r"sid|session|token|csrf|auth|key|sig", re.IGNORECASE)
+TOKEN_PARAM = re.compile(r"sid|session|token|csrf|auth|key|sig", re.IGNORECASE)
 _OPAQUE_VALUE = re.compile(r"[A-Za-z0-9_\-]{32,}")
 _TRACKING = re.compile(r"utm_[a-z]+|fbclid|gclid|msclkid", re.IGNORECASE)
 
@@ -74,7 +74,7 @@ def _safe_pairs(raw_pairs: list[str], hit: list[bool]) -> list[str] | None:
         name, _, value = pair.partition("=")
         if is_query:
             kept.append(f"{name}={{q}}")
-        elif _TOKEN_NAME.search(unquote_plus(name)) or _OPAQUE_VALUE.fullmatch(unquote_plus(value)):
+        elif TOKEN_PARAM.search(unquote_plus(name)) or _OPAQUE_VALUE.fullmatch(unquote_plus(value)):
             return None
         elif not _TRACKING.fullmatch(name):
             kept.append(pair)
