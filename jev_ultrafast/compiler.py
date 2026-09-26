@@ -54,7 +54,10 @@ def cache_key(goal: str) -> str:
 
 
 class ProgramCache:
-    """Compiled programs by prompt/model version and normalized goal, in one small JSON file. Only compiler-made programs are stored."""
+    """Compiled programs by prompt/model version and normalized goal, in one small JSON file.
+
+    Only compiler-made programs are stored.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
