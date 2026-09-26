@@ -1247,3 +1247,30 @@ Recorded during implementation (commits named in the overnight report).
    The compiler prompt now says that "top"/"first" is `@1`.
 7. **Checkpoint A:** heading matching ignores a trailing bracketed segment ("References[edit]" on skins that put
    the edit link inside the heading).
+
+### Pre-merge fixes
+
+Test-first, one commit each (after the live evaluation: 10/25, site search 0/5, Hacker News ordinals failing).
+
+1. Learned search templates: same host as the page searched from, http(s) only, no credentials in the URL,
+   refused on token-like parameters or opaque 32+ character values, tracking parameters dropped — `d442a8a`.
+2. OpenSearch templates: http(s) with a non-empty host equal to the page host — `dfe1554`.
+3. Program cache key includes a hash of `COMPILER_SYSTEM` and the compiler model — `d34bd4b` (docstring wrap `2102df4`).
+4. Site search: few-shot example ending at FIND; `drop_redundant_opens` removes an OPEN/CLICK of the name the
+   preceding FIND reached (compile and cache read) — `364dc1a`.
+5. Ordinals: word match, then the group of the resolver's/actor's pick, then the largest resembling group;
+   "discuss" has the "# comment" shape and "discussion"/"thread" mean "comment"; few-shot now `OPEN comments @4`;
+   Hacker News-shaped fixture test — `e632ed2`.
+6. The early DONE applies only when the current subgoal is the last one — `1975526`.
+7. `scripts/explore.py`: needs `--cdp-url`/`LAYA_EXPLORE_CDP_URL` (not 9222/9223, not the user's `BU_CDP_URL`;
+   own `BU_NAME`), skips action-like and token-carrying URLs, one user agent for robots.txt and Chrome
+   (`Emulation.setUserAgentOverride`), waits `max(1, Crawl-delay)` — `4c9ec24`.
+8. "Required before merge / release" note with the real-Chrome command (plan and README) — `0754fce`; run on the
+   branch: 11 passed, no skips.
+9. Atomic cache writes (temp file + `os.replace`) — `c4731b2`.
+10. `parse_program(..., goal_mode=True)` reads back a rendered `DO` program; compiler output still rejects `DO`
+    — `fb9a6b5`.
+11. `contextlib.nullcontext` instead of `/dev/null` in `training/step_items.py` — `257734a`.
+12. OpenSearch discovery uses the snapshot's `opensearch` link (no page query without a same-host link); the
+    controller's `discover` callback now takes the page — `2106ef1`.
+13. `scrolled to "<target>"` evidence for a JUMP/SCROLL completed by scrolling — `bec8c52`.
