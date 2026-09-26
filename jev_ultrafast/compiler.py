@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from .program import Program, fallback_program, parse_program, render_program
+from .program import Program, drop_redundant_opens, fallback_program, parse_program, render_program
 from .textmodel import DISABLE_THINKING, compiler_model, complete_text
 
 log = logging.getLogger("compiler")
@@ -35,6 +35,9 @@ JUMP FAQ
 Task: Find the article about the Eiffel Tower, then open the article about Gustave Eiffel from it.
 FIND Eiffel Tower
 FIND Gustave Eiffel
+
+Task: Search for and open the recipe page for shakshuka.
+FIND shakshuka
 
 Task: Open the discussion thread of the fourth post in the list.
 OPEN discussion @4
@@ -74,7 +77,7 @@ class ProgramCache:
         if not isinstance(text, str):
             return None
         try:
-            program = parse_program(text)
+            program = drop_redundant_opens(parse_program(text))
         except ValueError:
             return None
         return Program(program.subgoals, program.done_text, source="cache")
@@ -116,7 +119,7 @@ def compile_goal(goal: str, *, complete: Callable = complete_text,
         meta["raw"] = raw
         meta["completion_tokens"] += (info or {}).get("usage", {}).get("completion_tokens", 0)
         try:
-            program = parse_program(raw)
+            program = drop_redundant_opens(parse_program(raw))
         except ValueError as exc:
             meta["error"] = str(exc)
             user = f"Task: {goal}\nYour previous answer was invalid: {exc}. Answer again with program lines only."

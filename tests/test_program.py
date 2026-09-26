@@ -1,6 +1,13 @@
 import pytest
 
-from jev_ultrafast.program import Program, Subgoal, fallback_program, parse_program, render_program
+from jev_ultrafast.program import (
+    Program,
+    Subgoal,
+    drop_redundant_opens,
+    fallback_program,
+    parse_program,
+    render_program,
+)
 
 
 def test_parses_kinds_values_ordinals_and_done_text():
@@ -29,3 +36,16 @@ def test_render_round_trips():
 
 def test_fallback_is_a_single_do_subgoal():
     assert fallback_program("Buy milk") == Program((Subgoal("DO", "Buy milk"),), source="fallback")
+
+
+def test_an_open_of_what_find_just_reached_is_dropped():
+    program = drop_redundant_opens(parse_program("FIND Ada Lovelace\nOPEN ada lovelace.\nCLICK Ada Lovelace"))
+    assert [(s.kind, s.target) for s in program.subgoals] == [("FIND", "Ada Lovelace")]
+
+
+def test_other_steps_after_find_are_kept():
+    text = "FIND Ada Lovelace\nOPEN Talk\nFIND Charles Babbage\nOPEN History @2"
+    program = drop_redundant_opens(parse_program(text))
+    assert render_program(program) == text
+    twice = parse_program("OPEN Ada\nOPEN Ada")
+    assert drop_redundant_opens(twice) == twice

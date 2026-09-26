@@ -1,7 +1,9 @@
 """The subgoal program a goal compiles into: a closed, line-based grammar the controller executes without an LLM."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from .resolver import normalize
 
 KINDS = ("FIND", "OPEN", "JUMP", "SCROLL", "FILL", "SELECT", "CLICK", "SUBMIT")
 VALUE_KINDS = ("FILL", "SELECT")
@@ -80,6 +82,18 @@ def parse_program(text: str) -> Program:
     if len(subgoals) > MAX_SUBGOALS:
         raise ValueError(f"Program has more than {MAX_SUBGOALS} steps")
     return Program(subgoals, done_text)
+
+
+def drop_redundant_opens(program: Program) -> Program:
+    """Drop an OPEN/CLICK of the very name the preceding FIND reached: FIND already lands on that page."""
+    kept: list[Subgoal] = []
+    for sub in program.subgoals:
+        previous = kept[-1] if kept else None
+        if (sub.kind in ("OPEN", "CLICK") and not sub.ordinal and previous is not None and previous.kind == "FIND"
+                and normalize(sub.target) == normalize(previous.target)):
+            continue
+        kept.append(sub)
+    return replace(program, subgoals=tuple(kept))
 
 
 def render_program(program: Program) -> str:

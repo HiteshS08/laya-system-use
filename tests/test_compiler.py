@@ -76,3 +76,14 @@ def test_cache_key_changes_with_the_prompt_and_the_model(tmp_path, monkeypatch):
     compile_goal("Find Ada", complete=complete, cache=ProgramCache(tmp_path / "p.json"))
     assert len(calls) == 3
     assert compiler.cache_key("  find ADA ") == compiler.cache_key("Find Ada")
+
+
+def test_compiled_find_then_open_of_the_same_name_ends_at_find():
+    complete, _ = fake("FIND Ada Lovelace\nOPEN Ada Lovelace")
+    program, _ = compile_goal("Look up Ada Lovelace.", complete=complete)
+    assert [s.kind for s in program.subgoals] == ["FIND"]
+
+
+def test_prompt_has_a_search_example_that_ends_at_find():
+    blocks = [b.strip().splitlines() for b in COMPILER_SYSTEM.split("\n\n")[1:]]
+    assert any(b[1].startswith("FIND ") and len(b) == 2 and "open" in b[0].lower() for b in blocks)
