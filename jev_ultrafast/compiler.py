@@ -1,5 +1,6 @@
 """One LLM call per task: rewrite the goal as a short subgoal program. Cached by goal; never called per step."""
 
+import hashlib
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .program import Program, fallback_program, parse_program, render_program
-from .textmodel import DISABLE_THINKING, complete_text
+from .textmodel import DISABLE_THINKING, compiler_model, complete_text
 
 log = logging.getLogger("compiler")
 MAX_TOKENS = 96
@@ -47,11 +48,13 @@ DONE_WHEN hotels found"""
 
 
 def cache_key(goal: str) -> str:
-    return " ".join(goal.casefold().split())
+    """Normalized goal, prefixed by the prompt and model it was compiled with, so either change invalidates it."""
+    version = hashlib.sha256(f"{compiler_model()}\n{COMPILER_SYSTEM}".encode()).hexdigest()[:12]
+    return f"{version}:{' '.join(goal.casefold().split())}"
 
 
 class ProgramCache:
-    """Compiled programs by normalized goal, in one small JSON file. Only compiler-made programs are stored."""
+    """Compiled programs by prompt/model version and normalized goal, in one small JSON file. Only compiler-made programs are stored."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)

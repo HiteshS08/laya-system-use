@@ -75,11 +75,15 @@ def complete_json(system: str, user: str, *, max_tokens: int = 256,
     raise ValueError(f"Text model returned no valid JSON after 2 attempts: {last_error}") from last_error
 
 
+def compiler_model() -> str:
+    return os.environ.get("COMPILER_MODEL") or os.environ.get("TEXT_MODEL", DEFAULT_MODEL)
+
+
 def complete_text(system: str, user: str, *, max_tokens: int = 96,
                   extra: Mapping | None = None) -> tuple[str, dict]:
     """One plain-text completion (no retry here: the caller validates and decides). COMPILER_MODEL wins if set."""
     base, key, timeout = _endpoint()
-    name = os.environ.get("COMPILER_MODEL") or os.environ.get("TEXT_MODEL", DEFAULT_MODEL)
+    name = compiler_model()
     started = time.perf_counter()
     result = _model.post_json(base + "/chat/completions", key, _body(name, system, user, max_tokens, extra),
                               timeout=timeout)

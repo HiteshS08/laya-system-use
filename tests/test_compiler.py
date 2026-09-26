@@ -63,3 +63,16 @@ def test_corrupt_cache_file_is_treated_as_empty(tmp_path):
 def test_prompt_examples_are_not_suite_goals():
     for task in TASKS.values():
         assert task.goal not in COMPILER_SYSTEM
+
+
+def test_cache_key_changes_with_the_prompt_and_the_model(tmp_path, monkeypatch):
+    from jev_ultrafast import compiler
+
+    complete, calls = fake("FIND Ada", "FIND Ada", "FIND Ada")
+    compile_goal("Find Ada", complete=complete, cache=ProgramCache(tmp_path / "p.json"))
+    monkeypatch.setenv("COMPILER_MODEL", "other-model")
+    compile_goal("Find Ada", complete=complete, cache=ProgramCache(tmp_path / "p.json"))
+    monkeypatch.setattr(compiler, "COMPILER_SYSTEM", COMPILER_SYSTEM + "\nTask: x\nFIND x")
+    compile_goal("Find Ada", complete=complete, cache=ProgramCache(tmp_path / "p.json"))
+    assert len(calls) == 3
+    assert compiler.cache_key("  find ADA ") == compiler.cache_key("Find Ada")
