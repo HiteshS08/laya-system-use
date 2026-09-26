@@ -7,6 +7,7 @@ Usage: uv run python training/step_items.py --input data/mind2web/data/train/*.j
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import logging
@@ -94,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
     rng, counts = random.Random(args.seed), Counter()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     dev_path = args.out.with_name(args.out.stem + "_dev.jsonl")
-    with args.out.open("w") as train, (dev_path.open("w") if args.dev_mod else open("/dev/null", "w")) as dev:
+    with args.out.open("w") as train, (dev_path.open("w") if args.dev_mod else contextlib.nullcontext()) as dev:
         for task in iter_tasks(args.input):
             for row in task_step_rows(task, rng, args.goal_mode_p):
                 split = "dev" if _is_dev(task["website"], args.dev_mod) else "train"

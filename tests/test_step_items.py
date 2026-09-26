@@ -48,3 +48,18 @@ def test_cli_writes_rows_and_refuses_test_splits(tmp_path):
         main(["--input", str(tmp_path / "test_task_1.json"), "--out", str(out)])
     with pytest.raises(SystemExit):
         main(["--input", str(tmp_path / "test" / "x.json"), "--out", str(out)])
+
+
+def test_cli_without_a_dev_split_opens_no_extra_file(tmp_path, monkeypatch):
+    import builtins
+
+    shard = tmp_path / "train_0.json"
+    shard.write_text(json.dumps([make_task(make_step("CLICK", gold="10"))]))
+    real_open = builtins.open
+
+    def guarded(file, *args, **kwargs):
+        assert str(file) != "/dev/null", "no /dev/null (not portable)"
+        return real_open(file, *args, **kwargs)
+    monkeypatch.setattr(builtins, "open", guarded)
+    main(["--input", str(shard), "--out", str(tmp_path / "rows.jsonl"), "--goal-mode-p", "0"])
+    assert (tmp_path / "rows.jsonl").read_text()
