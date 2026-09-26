@@ -40,7 +40,7 @@ Task: Search for and open the recipe page for shakshuka.
 FIND shakshuka
 
 Task: Open the discussion thread of the fourth post in the list.
-OPEN discussion @4
+OPEN comments @4
 
 Task: Search for hotels in Lisbon for 2 guests checking in on March 3. Stop when hotel results are shown.
 FILL Destination = Lisbon

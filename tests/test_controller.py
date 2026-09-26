@@ -104,6 +104,13 @@ def test_ordinal_route_needs_no_model():
     assert (d["choice"], d["route"]) == ("e5", "ordinal")
 
 
+def test_ordinal_without_a_word_match_uses_the_group_of_the_actors_pick():
+    rows = [act(1, "Story one"), act(2, "48 replies"), act(3, "Story two"), act(4, "3 replies")]
+    c = controller("OPEN talk page @2", predict=ranked("2"))
+    d = c.decide(page(actions=rows), [])
+    assert (d["choice"], d["route"]) == ("e4", "ordinal") and c.actor_calls == 1
+
+
 def test_fill_uses_the_program_value_then_picks_the_suggestion_then_moves_on():
     field = [act(1, "Where to?", "fill", "combobox"), act(2, "Search", role="button")]
     c = controller("FILL Where to? = London\nCLICK Search")

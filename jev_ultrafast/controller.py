@@ -208,15 +208,28 @@ class Controller:
         if not pool:
             return None, "no_candidates", None
         if step.ordinal:
-            element = ordinal_pick(pool, step.target_text, step.ordinal)
+            element = ordinal_pick(pool, step.target_text, step.ordinal,
+                                   anchor=lambda: self._anchor(step, pool, history))
             return (element["index"] if element else None), "ordinal", None
         element, how = resolve(step.target_text, pool)
         if element is not None:
             return element["index"], how, None
+        picked = self._pick(step, pool, history)
+        return picked.index, "actor", picked
+
+    def _pick(self, step: Step, pool: Sequence[Mapping], history: Sequence[Mapping]) -> ActorPick:
         picked = pick_target(step, pool, history_strings(history), predict=self._predict)
         if picked.model not in ("sole", "none"):
             self.actor_calls += 1
-        return picked.index, "actor", picked
+        return picked
+
+    def _anchor(self, step: Step, pool: Sequence[Mapping], history: Sequence[Mapping]) -> Mapping | None:
+        """An element of the wanted kind, when no group's labels share a word with the ordinal target."""
+        element, _ = resolve(step.target_text, pool)
+        if element is not None:
+            return element
+        index = self._pick(step, pool, history).index
+        return next((e for e in pool if e["index"] == index), None)
 
     def _act(self, step: Step, usable: Sequence[Mapping], elements: Sequence[Mapping], targets: Mapping,
              history: Sequence[Mapping], started: float) -> dict | None:
