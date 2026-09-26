@@ -46,7 +46,8 @@ def template_from_opensearch(xml_text: str, page_url: str) -> str | None:
         raw = node.get("template") or ""
         if not node.tag.endswith("Url") or node.get("type") != "text/html" or "{searchTerms}" not in raw:
             continue
-        if _host(raw) != _host(page_url):
+        host = _web_host(raw)
+        if not host or host != _web_host(page_url):
             return None
         template = _drop_optional(raw.replace("{searchTerms}", "{q}"))
         return template if _PLACEHOLDER.findall(template) == ["{q}"] else None

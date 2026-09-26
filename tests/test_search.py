@@ -25,6 +25,15 @@ def test_opensearch_html_template_for_the_same_host():
     assert template_from_opensearch(OSD.replace('type="text/html"', 'type="x"'), WIKI) is None
 
 
+def test_opensearch_needs_an_http_template_on_the_page_host():
+    for bad in ("javascript:alert(1)//{searchTerms}", "data:text/html,{searchTerms}", "file:///x?q={searchTerms}"):
+        osd = OSD.replace("https://en.wikipedia.org/w/index.php?title=Special:Search&amp;search={searchTerms}"
+                          "&amp;page={startPage?}", bad)
+        assert template_from_opensearch(osd, "about:blank") is None, bad
+        assert template_from_opensearch(osd, WIKI) is None, bad
+    assert template_from_opensearch(OSD, "file:///wiki/Main_Page") is None
+
+
 def test_opensearch_with_another_required_placeholder_is_ignored():
     osd = OSD.replace("{startPage?}", "{language}")
     assert template_from_opensearch(osd, WIKI) is None
