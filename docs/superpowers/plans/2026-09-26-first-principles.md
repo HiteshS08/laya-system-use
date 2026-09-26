@@ -1166,6 +1166,18 @@ Commit: `feat: generate actor items from explored public pages without an LLM`.
 
 ## Deferred tasks (DEFERRED TO MAC)
 
+### Required before merge / release
+- [ ] End-to-end fixture tests in a real browser (skipped by a plain `uv run pytest` when no Chrome is up):
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9333 \
+  --user-data-dir="$(mktemp -d)" --headless=new about:blank >/dev/null 2>&1 &
+BU_CDP_URL=http://127.0.0.1:9333 uv run pytest tests/test_e2e_fixture.py tests/test_snapshot_live.py -q
+kill %1
+```
+
+  Both files must pass with no skips.
+
 ### D1 — Compiler model benchmark (DEFERRED TO MAC: MLX, model download)
 ```bash
 uv run mlx_lm.server --model mlx-community/Qwen3-4B-Instruct-2507-4bit --port 8080 &
@@ -1190,8 +1202,9 @@ uv run python training/prepare_items.py --cases training/out/step_train.jsonl --
 uv run python training/evaluate.py --predictor laya --checkpoint checkpoints/laya_step --cases training/out/step_train_dev.jsonl
 ```
 ### D4 — Exploration run (DEFERRED TO MAC; needs the user's approval of the seed sites)
+Start the throwaway Chrome on port 9333 as above first; the explorer refuses to run without one.
 ```bash
-uv run python scripts/explore.py --seeds https://docs.python.org/3/ https://developer.mozilla.org/en-US/ --pages 200 --out data/explore/items.jsonl
+uv run python scripts/explore.py --cdp-url http://127.0.0.1:9333 --seeds https://docs.python.org/3/ https://developer.mozilla.org/en-US/ --pages 200 --out data/explore/items.jsonl
 ```
 ### D5 — Delete the per-step planner stack (DEFERRED; only if D2 shows the program backend ≥ the planner backend)
 Delete `pilot.py`, `planner.py`, `verifier.py`, the pick path in `router.py`, `scripts/bench_planner.py`,
